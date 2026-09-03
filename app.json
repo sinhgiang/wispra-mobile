@@ -8,9 +8,11 @@
     "scheme": "wispramobile",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.sinhgiang.wispramobile"
     },
     "android": {
+      "package": "com.sinhgiang.wispramobile",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -37,6 +39,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "1dd82f99-15b5-4b7d-b05e-5cb109f05b93"
+      }
+    },
+    "owner": "sinhgiang"
   }
 }
