@@ -29,5 +29,20 @@
         android:name="android.accessibilityservice"
         android:resource="@xml/wispra_accessibility" />
     </service>
+
+    <!-- The Wispra keyboard: speak, and the words are typed where the cursor is. The backup for
+         apps where the mic button cannot appear. Only the system can bind to it. -->
+    <service
+      android:name="expo.modules.wispradictation.WispraKeyboardService"
+      android:label="@string/wispra_keyboard_label"
+      android:permission="android.permission.BIND_INPUT_METHOD"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.view.InputMethod" />
+      </intent-filter>
+      <meta-data
+        android:name="android.view.im"
+        android:resource="@xml/wispra_keyboard" />
+    </service>
   </application>
 </manifest>

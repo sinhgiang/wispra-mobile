@@ -39,6 +39,24 @@ class TextInsertTest {
   }
 
   @Test
+  fun keyboardCommitAddsSpacesOnlyWhereNeeded() {
+    assertEquals("Chào anh", TextInsert.forCommit("", "  Chào anh ", ""))
+    assertEquals(" em gửi", TextInsert.forCommit("Chào anh,", "em gửi", null))
+    assertEquals("em gửi", TextInsert.forCommit("Chào anh, ", "em gửi", null))
+    assertEquals(" big ", TextInsert.forCommit("Hello", "big", "world"))
+    assertEquals(".", TextInsert.forCommit("Thanks", ".", null))
+    assertEquals("", TextInsert.forCommit("x", "   ", "y"))
+  }
+
+  @Test
+  fun undoOnlyWhenTheCommittedTextIsStillThere() {
+    assertEquals(true, TextInsert.canUndo("Chào anh em gửi", " em gửi"))
+    assertEquals(false, TextInsert.canUndo("Chào anh em gửi!", " em gửi"))
+    assertEquals(false, TextInsert.canUndo(null, "x"))
+    assertEquals(false, TextInsert.canUndo("x", ""))
+  }
+
+  @Test
   fun nothingDictatedLeavesTheFieldAlone() {
     assertEquals(Insertion("abc", 1), TextInsert.merge("abc", 1, 1, "   "))
   }

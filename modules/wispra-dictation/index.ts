@@ -9,6 +9,9 @@ interface NativeWispraDictation {
   getSession(): string | null;
   setSession(json: string | null): void;
   setCloudConfig(apiBase: string, supabaseUrl: string, publishableKey: string): void;
+  isKeyboardEnabled(): boolean;
+  openKeyboardSettings(): void;
+  showKeyboardPicker(): void;
   splitAudio(uri: string, pieceMs: number): Promise<{ uri: string; startMs: number; durationMs: number }[]>;
 }
 
@@ -23,6 +26,19 @@ export function isServiceEnabled(): boolean {
 
 export function openAccessibilitySettings(): void {
   native?.openAccessibilitySettings();
+}
+
+// The Wispra keyboard (Android): the backup for apps where the mic button cannot appear
+export function isKeyboardEnabled(): boolean {
+  return native?.isKeyboardEnabled() ?? false;
+}
+
+export function openKeyboardSettings(): void {
+  native?.openKeyboardSettings();
+}
+
+export function showKeyboardPicker(): void {
+  native?.showKeyboardPicker();
 }
 
 export function isBubbleEnabled(): boolean {

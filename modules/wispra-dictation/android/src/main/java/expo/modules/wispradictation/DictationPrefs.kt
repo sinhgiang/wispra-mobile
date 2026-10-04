@@ -20,6 +20,13 @@ object DictationPrefs {
   /** Where finished dictations wait for the app: files/wispra/inbox (the app's document directory) */
   fun inbox(context: Context): File = File(context.filesDir, "wispra/inbox")
 
+  /** Whether the Wispra keyboard is turned on in Settings > Keyboards (it may still not be the one in use) */
+  fun keyboardEnabled(context: Context): Boolean {
+    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+    val ours = ComponentName(context, WispraKeyboardService::class.java)
+    return imm.enabledInputMethodList.any { it.component == ours }
+  }
+
   /** Whether the user has turned the service on in Settings > Accessibility */
   fun serviceEnabled(context: Context): Boolean {
     val enabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false

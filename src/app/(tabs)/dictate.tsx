@@ -107,6 +107,7 @@ function AnyAppCard() {
       </Body>
       <View style={styles.cardAction}>
         <Button small kind={on ? 'secondary' : 'primary'} label={on ? 'Settings' : 'Set up'} onPress={() => router.push('/dictation-setup')} />
+        <Button small label="Wispra keyboard" onPress={() => router.push('/keyboard-setup')} />
       </View>
     </Card>
   );
@@ -115,7 +116,7 @@ function AnyAppCard() {
 const styles = StyleSheet.create({
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   status: { color: W.muted, fontSize: 13, fontWeight: '600' },
-  cardAction: { flexDirection: 'row' },
+  cardAction: { flexDirection: 'row', gap: Gap.s },
   content: { padding: Gap.xl, paddingTop: Gap.xl + 16, gap: Gap.l },
   recorder: { alignItems: 'center', paddingVertical: 28, gap: Gap.l },
   mic: { width: 88, height: 88, borderRadius: 44, backgroundColor: W.accent, alignItems: 'center', justifyContent: 'center' },

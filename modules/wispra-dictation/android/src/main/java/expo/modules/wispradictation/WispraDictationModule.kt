@@ -25,6 +25,21 @@ class WispraDictationModule : Module() {
       context.startActivity(intent)
     }
 
+    // The Wispra keyboard (backup for apps where the mic button cannot appear)
+    Function("isKeyboardEnabled") {
+      DictationPrefs.keyboardEnabled(context)
+    }
+
+    // Settings > Keyboards, where only the user can turn the Wispra keyboard on
+    Function("openKeyboardSettings") {
+      context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    // The system list for choosing the keyboard in use
+    Function("showKeyboardPicker") {
+      (context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showInputMethodPicker()
+    }
+
     // A switch inside Wispra to hide the bubble without going back to Settings
     Function("isBubbleEnabled") {
       DictationPrefs.bubbleEnabled(context)

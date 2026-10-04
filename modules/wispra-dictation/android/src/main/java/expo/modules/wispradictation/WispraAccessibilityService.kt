@@ -55,21 +55,10 @@ class WispraAccessibilityService : AccessibilityService() {
     super.onServiceConnected()
     recorder = DictationRecorder(this)
     bubble = Bubble(this, onMic = ::startDictation, onStop = ::finishDictation, onCancel = ::cancelDictation)
-    Transcribers.current = transcriber()
+    transcriber = Transcribers.create(this)
   }
 
-  // Wispra Cloud, with the sign-in made in the app. Debug builds first look for words in
-  // files/wispra/test-transcript.txt, so a test can check the typing without speaking to the
-  // cloud; release builds never read that file.
-  private fun transcriber(): Transcriber {
-    val cloud = CloudTranscriber(this)
-    val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-    if (!debuggable) return cloud
-    val testFile = File(filesDir, "wispra/test-transcript.txt")
-    return Transcriber { audio, durationMs ->
-      if (testFile.exists()) testFile.readText().trim().ifEmpty { null } else cloud.transcribe(audio, durationMs)
-    }
-  }
+  private lateinit var transcriber: Transcriber
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
     if (!::bubble.isInitialized || recorder.isRecording) return
@@ -145,7 +134,7 @@ class WispraAccessibilityService : AccessibilityService() {
     val field = target
     worker.execute {
       val text = try {
-        Transcribers.current?.transcribe(pending.audio, length)
+        transcriber.transcribe(pending.audio, length)
       } catch (_: Exception) {
         null
       }

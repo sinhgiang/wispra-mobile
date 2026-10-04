@@ -16,6 +16,13 @@ class DictationRecorder(private val context: Context) {
 
   fun elapsedMs(): Long = if (recorder == null) 0 else SystemClock.elapsedRealtime() - startedAt
 
+  /** Loudest input since the last call, 0 to 32767 (for the keyboard's level bars) */
+  fun amplitude(): Int = try {
+    recorder?.maxAmplitude ?: 0
+  } catch (_: IllegalStateException) {
+    0
+  }
+
   fun start(output: File) {
     output.parentFile?.mkdirs()
     val r = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()

@@ -30,4 +30,22 @@ object TextInsert {
   }
 
   private fun clamp(value: Int, max: Int): Int = value.coerceIn(0, max)
+
+  /**
+   * What a keyboard commits at the cursor for [dictated], given the character just before the
+   * cursor and the one just after it: the same spacing rules as [merge].
+   */
+  fun forCommit(before: CharSequence?, dictated: String, after: CharSequence?): String {
+    val words = dictated.trim()
+    if (words.isEmpty()) return ""
+    val prev = before?.lastOrNull()
+    val next = after?.firstOrNull()
+    val leading = if (prev != null && !prev.isWhitespace() && words.first() !in NO_SPACE_BEFORE) " " else ""
+    val trailing = if (next != null && !next.isWhitespace() && next !in NO_SPACE_BEFORE) " " else ""
+    return leading + words + trailing
+  }
+
+  /** Whether the text before the cursor still ends with what was committed, so Undo can take it back. */
+  fun canUndo(before: CharSequence?, committed: String): Boolean =
+    committed.isNotEmpty() && before != null && before.endsWith(committed)
 }
