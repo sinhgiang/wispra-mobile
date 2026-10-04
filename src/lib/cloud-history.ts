@@ -22,29 +22,47 @@ export interface HistoryPage {
   entries: HistoryEntry[];
   // The page holds the whole history
   complete: boolean;
+  // Ids deleted on any device since `deletedSince` (all of them when it is not given)
+  deleted: string[];
+  // The server's time of this answer: the next `deletedSince`
+  serverTime: string | null;
 }
 
-// The newest entries of the signed-in user's cloud history
-export async function readHistory(limit = 500): Promise<HistoryPage> {
-  const response = await call(`/api/history?limit=${limit}`);
+// The newest entries of the signed-in user's cloud history, and what was deleted since the last read
+export async function readHistory(deletedSince: string | null, limit = 500): Promise<HistoryPage> {
+  const since = deletedSince ? `&deletedSince=${encodeURIComponent(deletedSince)}` : '';
+  const response = await call(`/api/history?limit=${limit}${since}`);
   if (!response.ok) throw new Error(`Reading the shared history failed (HTTP ${response.status}).`);
-  const body = (await response.json()) as { entries?: HistoryEntry[]; nextBefore?: string | null };
-  return { entries: Array.isArray(body.entries) ? body.entries : [], complete: !body.nextBefore };
+  const body = (await response.json()) as { entries?: HistoryEntry[]; nextBefore?: string | null; deleted?: unknown; serverTime?: unknown };
+  return {
+    entries: Array.isArray(body.entries) ? body.entries : [],
+    complete: !body.nextBefore,
+    deleted: Array.isArray(body.deleted) ? body.deleted.filter((id): id is string => typeof id === 'string') : [],
+    serverTime: typeof body.serverTime === 'string' ? body.serverTime : null,
+  };
 }
 
 // Adds or updates entries by id; never deletes anything in the cloud
 export async function mergeHistory(entries: HistoryEntry[]): Promise<void> {
   const response = await call('/api/history/merge', { method: 'POST', body: JSON.stringify({ entries }) });
-  if (!response.ok) {
-    let detail = '';
-    try {
-      const body = (await response.json()) as { error?: unknown };
-      if (typeof body.error === 'string') detail = body.error;
-    } catch {
-      // No JSON body
-    }
-    throw new Error(detail || `Sharing the history failed (HTTP ${response.status}).`);
+  if (!response.ok) throw new Error(await errorFrom(response, 'Sharing the history failed'));
+}
+
+// Deletes entries of the signed-in user's history on every device: by id, or all of them. Throws
+// CloudUnavailable while Wispra Cloud has no delete route (404); the request then waits on the phone.
+export async function deleteHistory(request: { ids: string[] } | { all: true }): Promise<void> {
+  const response = await call('/api/history/delete', { method: 'POST', body: JSON.stringify(request) });
+  if (!response.ok) throw new Error(await errorFrom(response, 'Deleting from the shared history failed'));
+}
+
+async function errorFrom(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    if (typeof body.error === 'string') return body.error;
+  } catch {
+    // No JSON body
   }
+  return `${fallback} (HTTP ${response.status}).`;
 }
 
 export interface Usage {

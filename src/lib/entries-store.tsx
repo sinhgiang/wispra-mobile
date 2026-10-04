@@ -18,9 +18,31 @@ import {
 } from './meeting';
 import { canSplitAudio, splitAudio } from '@/modules/wispra-dictation';
 import { askMeeting, makeMindMap, makeOutline, makePost } from './meeting-ai';
-import { CloudUnavailable, mergeHistory, readHistory } from './cloud-history';
+import { CloudUnavailable, deleteHistory, mergeHistory, readHistory } from './cloud-history';
+import {
+  applyRemoteDeletes,
+  clearSent,
+  deletableEntries,
+  hasPendingDeletes,
+  NO_PENDING_DELETES,
+  pendingDeleteCount,
+  queueDelete,
+  queueDeleteAll,
+  type PendingDeletes,
+} from './history-delete';
 import { batches, planSync, toHistoryEntry } from './history-sync';
-import { clearInbox, deleteAudio, loadEntries, loadHidden, readInbox, removeEmptyLeftovers, saveEntries, saveHidden } from './storage';
+import {
+  clearInbox,
+  deleteAudio,
+  loadEntries,
+  loadHidden,
+  loadPendingDeletes,
+  readInbox,
+  removeEmptyLeftovers,
+  saveEntries,
+  saveHidden,
+  savePendingDeletes,
+} from './storage';
 import { CLOUD_UPLOAD_MAX_BYTES, transcribe, transcribeAudio, transcriptionAvailable } from './transcriber';
 
 interface EntriesApi {
@@ -36,8 +58,11 @@ interface EntriesApi {
   updateNotes(entryId: string, change: Partial<MeetingNotes>): void;
   // Cuts a piece that grew long into shorter ones (Android), so it can be transcribed
   splitLongPiece(entryId: string, segmentId: string): Promise<void>;
-  // Removes the entry and its audio files
+  // Removes the entry and its audio files. Signed in, a dictation is deleted on every device of the
+  // account too (the screen warns first, see history-delete.ts).
   remove(id: string): void;
+  // Removes every entry except one being recorded; signed in, the whole shared history too
+  removeAll(): void;
   // Try again on a recording that could not be transcribed
   retry(id: string): Promise<void>;
   // Ids of the entries being transcribed or written up right now
@@ -45,13 +70,20 @@ interface EntriesApi {
   // Transcribes what is waiting, if signed in (called after a new recording or piece), then
   // shares the history with Wispra on the computer
   transcribeWaiting(): Promise<void>;
-  // Last time the history was shared with Wispra Cloud, and why not when it could not be
-  syncState: { at: string | null; note: string | null };
+  // Last time the history was shared with Wispra Cloud, why not when it could not be, and how many
+  // deletions still have to reach the other devices
+  syncState: SyncState;
   // AI notes for a meeting: the summary and outline, the mind map, the post, a question
   makeNotes(id: string): Promise<void>;
   makeMindMapFor(id: string): Promise<void>;
   makePostFor(id: string): Promise<void>;
   ask(id: string, question: string): Promise<void>;
+}
+
+export interface SyncState {
+  at: string | null;
+  note: string | null;
+  waitingDeletes: number;
 }
 
 const EntriesContext = createContext<EntriesApi | null>(null);
@@ -80,10 +112,25 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const running = useRef(false);
   const syncing = useRef(false);
+  const syncAgain = useRef(false);
+  // syncHistory, for callbacks defined before it (remove)
+  const syncRef = useRef<(() => Promise<void>) | null>(null);
   // Computer dictations removed on this phone (see remove)
   const hidden = useRef<Set<string>>(new Set());
+  // Deletions not yet confirmed by Wispra Cloud (see history-delete.ts)
+  const pendingDeletes = useRef<PendingDeletes>(NO_PENDING_DELETES);
   // When the history was last shared with Wispra Cloud, and why it was not, if it was not
-  const [syncState, setSyncState] = useState<{ at: string | null; note: string | null }>({ at: null, note: null });
+  const [syncState, setSyncState] = useState<SyncState>({ at: null, note: null, waitingDeletes: 0 });
+
+  const setPendingDeletes = useCallback((next: PendingDeletes) => {
+    pendingDeletes.current = next;
+    try {
+      savePendingDeletes(next);
+    } catch {
+      // Kept in memory; tried again at the next change
+    }
+    setSyncState((prev) => ({ ...prev, waitingDeletes: pendingDeleteCount(next) }));
+  }, []);
 
   // Returns whether the list reached the disk
   const commit = useCallback((next: Entry[]): boolean => {
@@ -125,6 +172,12 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     } catch {
       hidden.current = new Set();
     }
+    try {
+      pendingDeletes.current = loadPendingDeletes();
+    } catch {
+      pendingDeletes.current = NO_PENDING_DELETES;
+    }
+    setSyncState((prev) => ({ ...prev, waitingDeletes: pendingDeleteCount(pendingDeletes.current) }));
     current.current = list;
     setEntries(list);
     setLoaded(true);
@@ -224,38 +277,96 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
-  const remove = useCallback(
-    (id: string) => {
-      const entry = current.current.find((e) => e.id === id);
-      for (const uri of [entry?.audioUri ?? null, ...(entry?.segments ?? []).map((s) => s.uri)]) {
+  // Deletes the audio of entries leaving the phone; a computer dictation is also remembered, so the
+  // shared history does not bring it back while Wispra Cloud has not deleted it yet
+  const forget = useCallback((gone: Entry[]) => {
+    let hiddenChanged = false;
+    for (const entry of gone) {
+      for (const uri of [entry.audioUri, ...(entry.segments ?? []).map((s) => s.uri)]) {
         try {
           deleteAudio(uri);
         } catch {
           // The entry goes even if a file is already gone
         }
       }
-      // A computer dictation is only hidden on the phone, so the shared history does not bring it back
-      if (entry?.source === 'computer') {
-        hidden.current.add(id);
-        try {
-          saveHidden(hidden.current);
-        } catch {
-          // It may come back from the shared history; nothing is lost
-        }
+      if (entry.source === 'computer') {
+        hidden.current.add(entry.id);
+        hiddenChanged = true;
       }
+    }
+    if (hiddenChanged) {
+      try {
+        saveHidden(hidden.current);
+      } catch {
+        // It may come back from the shared history; nothing is lost
+      }
+    }
+  }, []);
+
+  const remove = useCallback(
+    (id: string) => {
+      const entry = current.current.find((e) => e.id === id);
+      if (!entry) return;
+      forget([entry]);
+      // Signed in: deleted on every device of the account (sent now, or later if offline)
+      if (transcriptionAvailable()) setPendingDeletes(queueDelete(pendingDeletes.current, [entry]));
       commit(current.current.filter((e) => e.id !== id));
+      void syncRef.current?.();
     },
-    [commit],
+    [commit, forget, setPendingDeletes],
   );
+
+  const removeAll = useCallback(() => {
+    const gone = deletableEntries(current.current);
+    const goneIds = new Set(gone.map((e) => e.id));
+    forget(gone);
+    if (transcriptionAvailable()) setPendingDeletes(queueDeleteAll(pendingDeletes.current));
+    commit(current.current.filter((e) => !goneIds.has(e.id)));
+    void syncRef.current?.();
+  }, [commit, forget, setPendingDeletes]);
 
   // Shares the phone's dictations with Wispra on the computer, and brings the computer's in.
   // Quietly does nothing when signed out, offline, or while Wispra Cloud has no shared history yet.
   const syncHistory = useCallback(async () => {
-    if (syncing.current || readFailed.current || !transcriptionAvailable()) return;
+    if (readFailed.current || !transcriptionAvailable()) return;
+    if (syncing.current) {
+      // A deletion made during a sync is sent right after it
+      syncAgain.current = true;
+      return;
+    }
     syncing.current = true;
+    syncAgain.current = false;
     try {
-      const page = await readHistory();
-      const plan = planSync(current.current, page.entries, hidden.current, page.complete);
+      // 1. What this phone deleted goes first, so it cannot come back with the history read next
+      const waiting = pendingDeletes.current;
+      if (hasPendingDeletes(waiting)) {
+        try {
+          if (waiting.all) await deleteHistory({ all: true });
+          for (const ids of batches(waiting.ids)) await deleteHistory({ ids });
+          setPendingDeletes(clearSent(pendingDeletes.current, waiting));
+        } catch (err) {
+          // Until a delete-all reaches Wispra Cloud, nothing is read or shared: the history read now
+          // would bring back what the user deleted, and entries shared now would be deleted with it
+          if (waiting.all) {
+            throw err instanceof CloudUnavailable
+              ? new CloudUnavailable('Wispra Cloud cannot delete yet. The deletion waits on this phone.')
+              : err;
+          }
+        }
+      }
+
+      // 2. What other devices deleted leaves this phone
+      const page = await readHistory(pendingDeletes.current.since);
+      const { keep, removed } = applyRemoteDeletes(current.current, page.deleted);
+      if (removed.length > 0) {
+        forget(removed);
+        commit(keep);
+      }
+      if (page.serverTime) setPendingDeletes({ ...pendingDeletes.current, since: page.serverTime });
+
+      // 3. New dictations both ways; deleted ones are never brought back
+      const skip = new Set([...hidden.current, ...pendingDeletes.current.ids, ...page.deleted]);
+      const plan = planSync(current.current, page.entries, skip, page.complete);
       if (plan.upserts.length > 0) {
         const incoming = new Map(plan.upserts.map((e) => [e.id, e]));
         const kept = current.current.map((e) => incoming.get(e.id) ?? e);
@@ -268,13 +379,15 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
         const at = new Date().toISOString();
         commit(current.current.map((e) => (ids.has(e.id) ? { ...e, syncedAt: at } : e)));
       }
-      setSyncState({ at: new Date().toISOString(), note: null });
+      setSyncState((prev) => ({ ...prev, at: new Date().toISOString(), note: null }));
     } catch (err) {
-      setSyncState((prev) => ({ at: prev.at, note: err instanceof CloudUnavailable ? err.message : errorText(err) }));
+      setSyncState((prev) => ({ ...prev, note: err instanceof CloudUnavailable ? err.message : errorText(err) }));
     } finally {
       syncing.current = false;
     }
-  }, [commit]);
+    if (syncAgain.current) void syncRef.current?.();
+  }, [commit, forget, setPendingDeletes]);
+  syncRef.current = syncHistory;
 
   const mark = useCallback((id: string, on: boolean) => {
     setBusy((prev) => {
@@ -515,6 +628,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       updateNotes,
       splitLongPiece,
       remove,
+      removeAll,
       retry,
       busy,
       transcribeWaiting,
@@ -524,7 +638,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       makePostFor,
       ask,
     }),
-    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makePostFor, ask],
+    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, removeAll, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makePostFor, ask],
   );
   return <EntriesContext.Provider value={api}>{children}</EntriesContext.Provider>;
 }

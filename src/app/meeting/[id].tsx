@@ -1,14 +1,16 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { confirmDelete } from '@/components/wispra/confirm-delete';
 import { PendingCard } from '@/components/wispra/entry-card';
 import { ActionList, MeetingPlayer, MindMapView, SummaryText, TabChips } from '@/components/wispra/meeting-views';
 import { Body, Button, Card, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { formatDate, formatDuration, meetingLines, needsTranscription, type Entry } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
+import { deleteOneWarning } from '@/lib/history-delete';
 import { formatClock } from '@/lib/meeting';
 import { useSession } from '@/lib/use-session';
 
@@ -23,6 +25,7 @@ const TABS: { value: Tab; label: string }[] = [
 export default function MeetingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { entries, remove, busy } = useEntries();
+  const session = useSession();
   const entry = entries.find((e) => e.id === id);
   const [tab, setTab] = useState<Tab>('summary');
   const [seek, setSeek] = useState<{ ms: number; n: number } | undefined>();
@@ -41,18 +44,11 @@ export default function MeetingDetailScreen() {
     void Share.share({ message: text });
   };
 
-  const confirmDelete = () =>
-    Alert.alert('Delete this meeting?', 'The recording, its text and notes are removed from this phone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          router.back();
-          remove(entry.id);
-        },
-      },
-    ]);
+  const askDelete = () =>
+    confirmDelete(deleteOneWarning(entry, !!session), () => {
+      router.back();
+      remove(entry.id);
+    });
 
   const playFrom = (ms: number) => setSeek((prev) => ({ ms, n: (prev?.n ?? 0) + 1 }));
 
@@ -85,7 +81,7 @@ export default function MeetingDetailScreen() {
           {tab === 'mindmap' ? <MindMapTab entry={entry} working={busy.has(entry.id)} /> : null}
           {tab === 'post' ? <PostTab entry={entry} working={busy.has(entry.id)} /> : null}
           <MeetingPlayer entry={entry} seekRequest={seek} />
-          <Button label="Delete meeting" onPress={confirmDelete} />
+          <Button label="Delete meeting" onPress={askDelete} />
         </ScrollView>
 
         <AskBar entry={entry} working={busy.has(entry.id)} onAsked={() => setTab('summary')} />

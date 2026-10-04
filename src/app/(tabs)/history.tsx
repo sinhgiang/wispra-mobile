@@ -3,11 +3,14 @@ import { useMemo, useState } from 'react';
 import { SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { confirmDelete } from '@/components/wispra/confirm-delete';
 import { EntryCard } from '@/components/wispra/entry-card';
-import { Chip, Label, Title, ui } from '@/components/wispra/ui';
+import { Button, Chip, Label, Title, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { filterEntries, groupByDay, type Entry, type KindFilter } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
+import { deletableEntries, deleteAllWarning } from '@/lib/history-delete';
+import { useSession } from '@/lib/use-session';
 
 const FILTERS: { value: KindFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -16,7 +19,10 @@ const FILTERS: { value: KindFilter; label: string }[] = [
 ];
 
 export default function HistoryScreen() {
-  const { entries } = useEntries();
+  const { entries, removeAll } = useEntries();
+  const session = useSession();
+  const deletable = deletableEntries(entries);
+  const askDeleteAll = () => confirmDelete(deleteAllWarning(deletable, !!session), removeAll);
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState<KindFilter>('all');
 
@@ -32,7 +38,10 @@ export default function HistoryScreen() {
   return (
     <SafeAreaView edges={['top']} style={ui.screen}>
       <View style={styles.header}>
-        <Title>History</Title>
+        <View style={styles.titleRow}>
+          <Title>History</Title>
+          {deletable.length > 0 ? <Button small label="Delete all" onPress={askDeleteAll} /> : null}
+        </View>
         <TextInput
           accessibilityLabel="Search"
           placeholder="Search dictations and meetings"
@@ -58,7 +67,9 @@ export default function HistoryScreen() {
         renderItem={({ item }) => <EntryCard entry={item} onPress={() => open(item)} />}
         ListEmptyComponent={
           <Text style={styles.empty}>
-            {entries.length === 0 ? 'Your dictations and meetings will show up here.' : 'Nothing matches your search.'}
+            {entries.length === 0
+              ? 'Your dictations and meetings will show up here.'
+              : 'Nothing matches your search.'}
           </Text>
         }
       />
@@ -67,6 +78,7 @@ export default function HistoryScreen() {
 }
 
 const styles = StyleSheet.create({
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   header: { padding: Gap.xl, paddingTop: Gap.xl + 16, paddingBottom: Gap.m, gap: Gap.m },
   search: {
     height: 44,

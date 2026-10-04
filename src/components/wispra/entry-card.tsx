@@ -1,19 +1,39 @@
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { confirmDelete } from './confirm-delete';
 import { Button } from './ui';
 
 import { Gap, W } from '@/constants/wispra';
 import { formatDuration, formatTime, needsTranscription, previewText, type Entry } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
+import { deleteOneWarning } from '@/lib/history-delete';
+import { useSession } from '@/lib/use-session';
+
+// Touch and hold an entry to delete it, after a warning that says where it is deleted
+function useDelete(entry: Entry): () => void {
+  const { remove } = useEntries();
+  const session = useSession();
+  return () => confirmDelete(deleteOneWarning(entry, !!session), () => remove(entry.id));
+}
 
 export function EntryCard({ entry, onPress }: { entry: Entry; onPress?: () => void }) {
   if (needsTranscription(entry)) return <PendingCard entry={entry} onPress={onPress} />;
+  return <DoneCard entry={entry} onPress={onPress} />;
+}
+
+function DoneCard({ entry, onPress }: { entry: Entry; onPress?: () => void }) {
+  const askDelete = useDelete(entry);
   const meeting = entry.kind === 'meeting';
   // MTG a meeting, PC a dictation made with Wispra on the computer, DIC one made on this phone
   const tag = meeting ? 'MTG' : entry.source === 'computer' ? 'PC' : 'DIC';
   const tagColor = meeting ? W.green : entry.source === 'computer' ? W.amberSoft : W.accentSoft;
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={styles.card}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityHint="Touch and hold to delete"
+      onPress={onPress}
+      onLongPress={entry.status === 'recording' ? undefined : askDelete}
+      style={styles.card}>
       <View style={styles.tag}>
         <Text style={[styles.tagText, { color: tagColor }]}>{tag}</Text>
       </View>
@@ -35,16 +55,12 @@ export function EntryCard({ entry, onPress }: { entry: Entry; onPress?: () => vo
 // A recording whose words are not text yet. It is never dropped: it stays here until it is
 // transcribed or the user deletes it.
 export function PendingCard({ entry, onPress }: { entry: Entry; onPress?: () => void }) {
-  const { retry, remove, busy: transcribing } = useEntries();
+  const { retry, busy: transcribing } = useEntries();
+  const askDelete = useDelete(entry);
   const busy = transcribing.has(entry.id);
 
   const tryAgain = () => void retry(entry.id);
 
-  const confirmDelete = () =>
-    Alert.alert('Delete this recording?', 'The audio has not been transcribed. It cannot be brought back.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => remove(entry.id) },
-    ]);
 
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={styles.pending}>
@@ -55,7 +71,7 @@ export function PendingCard({ entry, onPress }: { entry: Entry; onPress?: () => 
       <Text style={styles.pendingNote}>{busy ? 'Transcribing with Wispra Cloud…' : (entry.error ?? 'The audio is kept on this phone.')}</Text>
       <View style={styles.actions}>
         <Button small kind="primary" label={busy ? 'Trying…' : 'Try again'} disabled={busy} onPress={tryAgain} />
-        <Button small label="Delete" onPress={confirmDelete} />
+        <Button small label="Delete" onPress={askDelete} />
       </View>
     </Pressable>
   );

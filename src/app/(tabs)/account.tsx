@@ -89,6 +89,9 @@ export default function AccountScreen() {
               value={syncState.note ? 'Not yet' : syncState.at ? `Synced ${formatTime(syncState.at)}` : '…'}
             />
           ) : null}
+          {syncState.waitingDeletes > 0 ? (
+            <Row label="Deletions waiting to reach your other devices" value={`${syncState.waitingDeletes}`} />
+          ) : null}
           <Row
             label="Waiting for transcription"
             value={stats.waiting > 0 ? `${stats.waiting} · ${formatDuration(stats.waitingMs)}` : '0'}
