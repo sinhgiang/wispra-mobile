@@ -99,7 +99,8 @@ describe('formatting', () => {
   it('previews an untranscribed meeting by its length and bookmarks', () => {
     const m = { ...createEntry('meeting', new Date(), 'm'), durationMs: 125_000, bookmarks: [1000] };
     expect(previewText(m)).toBe('2:05 · 1 bookmark');
-    expect(previewText({ ...m, text: 'hello   world' })).toBe('hello world');
+    expect(previewText({ ...m, text: 'hello   world', notes: { actions: [{ text: 'a' }, { text: 'b' }] } })).toBe('2:05 · 2 action items');
+    expect(previewText({ ...m, kind: 'dictation', text: 'hello   world' })).toBe('hello world');
   });
 });
 

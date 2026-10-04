@@ -9,6 +9,7 @@ interface NativeWispraDictation {
   getSession(): string | null;
   setSession(json: string | null): void;
   setCloudConfig(apiBase: string, supabaseUrl: string, publishableKey: string): void;
+  splitAudio(uri: string, pieceMs: number): Promise<{ uri: string; startMs: number; durationMs: number }[]>;
 }
 
 // Android only: the mic button over other apps' text fields. iPhone gets the Wispra keyboard instead.
@@ -39,6 +40,15 @@ export function getSession(): string | null {
 
 export function setSession(json: string | null): void {
   native?.setSession(json);
+}
+
+export const canSplitAudio = native !== null;
+
+// Cuts an .m4a recording into pieces of pieceMs without re-encoding (Android). The original file
+// stays; remove it once the pieces are saved.
+export async function splitAudio(uri: string, pieceMs: number): Promise<{ uri: string; startMs: number; durationMs: number }[]> {
+  if (!native) throw new Error('Splitting audio is not available on this phone.');
+  return native.splitAudio(uri, pieceMs);
 }
 
 // Where the service sends dictations to be transcribed

@@ -46,5 +46,15 @@ class WispraDictationModule : Module() {
     Function("setCloudConfig") { apiBase: String, supabaseUrl: String, publishableKey: String ->
       CloudSession.setConfig(context, apiBase, supabaseUrl, publishableKey)
     }
+
+    // Cuts a recording into pieces of pieceMs (no re-encoding). The pieces are written next to
+    // it; the original is left in place for the caller to remove once the pieces are saved.
+    AsyncFunction("splitAudio") { uri: String, pieceMs: Double ->
+      val input = java.io.File(android.net.Uri.parse(uri).path ?: uri)
+      val base = input.nameWithoutExtension
+      AudioSplitter.split(input, input.parentFile ?: context.filesDir, base, pieceMs.toLong()).map {
+        mapOf("uri" to android.net.Uri.fromFile(it.file).toString(), "startMs" to it.startMs.toDouble(), "durationMs" to it.durationMs.toDouble())
+      }
+    }
   }
 }

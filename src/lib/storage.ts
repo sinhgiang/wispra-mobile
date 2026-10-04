@@ -76,6 +76,22 @@ export function clearInbox(items: InboxItem[]): void {
   for (const { note } of items) if (note.exists) note.delete();
 }
 
+// The recorder prepares a file before it knows whether it will record; one that never recorded
+// stays empty. Those are removed when Wispra starts: only empty files that belong to no entry and
+// are more than ten minutes old. A file with sound in it is never removed here.
+const recorderDir = new Directory(Paths.document, 'Audio');
+const LEFTOVER_AGE_MS = 10 * 60 * 1000;
+
+export function removeEmptyLeftovers(entries: Entry[]): void {
+  if (!recorderDir.exists) return;
+  const used = new Set(entries.flatMap((e) => [e.audioUri, ...(e.segments ?? []).map((s) => s.uri)]).filter(Boolean));
+  for (const item of recorderDir.list()) {
+    if (!(item instanceof File) || used.has(item.uri)) continue;
+    const modified = item.modificationTime ?? Date.now();
+    if ((item.size ?? 1) === 0 && Date.now() - modified > LEFTOVER_AGE_MS) item.delete();
+  }
+}
+
 export function deleteAudio(uri: string | null): void {
   if (!uri) return;
   const file = new File(uri);

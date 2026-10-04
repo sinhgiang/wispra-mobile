@@ -1,3 +1,5 @@
+import { recoverSegments, transcriptLines, type MeetingNotes, type MeetingSegment, type TranscriptLine } from './meeting';
+
 // Dictations and meetings kept on the phone. Pure functions only, so they can be tested without
 // native modules.
 
@@ -21,6 +23,10 @@ export interface Entry {
   error: string | null;
   // Positions in the recording, in milliseconds, that the user marked during a meeting
   bookmarks: number[];
+  // Meetings recorded in pieces (from part 3 on); audioUri is then null
+  segments?: MeetingSegment[];
+  // Summary, topics, action items, mind map, post and questions asked about a meeting
+  notes?: MeetingNotes;
 }
 
 export type KindFilter = 'all' | EntryKind;
@@ -156,9 +162,21 @@ export function formatDate(iso: string): string {
 export function recoverInterrupted(entries: Entry[], activeId: string | null = null): Entry[] {
   return entries.map((e) =>
     e.status === 'recording' && e.id !== activeId
-      ? { ...e, status: 'pending', error: 'The recording was interrupted. The audio saved until then is kept.' }
+      ? {
+          ...e,
+          status: 'pending',
+          error: 'The recording was interrupted. The audio saved until then is kept.',
+          ...(e.segments ? { segments: recoverSegments(e.segments) } : {}),
+        }
       : e,
   );
+}
+
+// The transcript of a meeting as numbered paragraphs. A meeting recorded in one piece (before
+// part 3) is a single paragraph.
+export function meetingLines(entry: Entry): TranscriptLine[] {
+  if (entry.segments) return transcriptLines(entry.segments);
+  return entry.text?.trim() ? [{ ref: 1, startMs: 0, text: entry.text.trim() }] : [];
 }
 
 export function needsTranscription(entry: Entry): boolean {
@@ -167,9 +185,12 @@ export function needsTranscription(entry: Entry): boolean {
 
 // One line shown under the title in lists
 export function previewText(entry: Entry): string {
-  if (entry.text) return entry.text.replace(/\s+/g, ' ').trim();
   const length = formatDuration(entry.durationMs);
+  // A meeting shows its length and what came out of it, as in the design; a dictation its words
+  if (entry.text && entry.kind !== 'meeting') return entry.text.replace(/\s+/g, ' ').trim();
   if (entry.kind === 'meeting') {
+    const actions = entry.notes?.actions?.length ?? 0;
+    if (actions > 0) return `${length} · ${actions} action item${actions === 1 ? '' : 's'}`;
     const marks = entry.bookmarks.length;
     return marks > 0 ? `${length} · ${marks} bookmark${marks === 1 ? '' : 's'}` : length;
   }

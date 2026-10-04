@@ -30,13 +30,18 @@ async function errorDetail(response: Response): Promise<string> {
 }
 
 export async function transcribe(entry: Entry): Promise<TranscribeResult> {
-  if (!entry.audioUri) return { ok: false, error: 'The audio file is not on this phone.' };
-  const audio = new File(entry.audioUri);
+  return transcribeAudio(entry.audioUri, entry.durationMs);
+}
+
+// One audio file: a dictation, a meeting recorded before part 3, or one piece of a meeting
+export async function transcribeAudio(uri: string | null, durationMs: number): Promise<TranscribeResult> {
+  if (!uri) return { ok: false, error: 'The audio file is not on this phone.' };
+  const audio = new File(uri);
   if (!audio.exists) return { ok: false, error: 'The audio file is not on this phone.' };
   if ((audio.size ?? 0) > CLOUD_UPLOAD_MAX_BYTES) {
     return {
       ok: false,
-      error: 'This recording is longer than Wispra Cloud takes in one piece (about 17 minutes). Transcribing long meetings in parts comes in the next update. The audio is kept.',
+      error: 'This recording is longer than Wispra Cloud takes in one piece (about 17 minutes). The audio is kept; meetings recorded from now on are sent in pieces.',
     };
   }
   const token = await validToken();
@@ -57,7 +62,7 @@ export async function transcribe(entry: Entry): Promise<TranscribeResult> {
       headers: {
         Authorization: `Bearer ${token}`,
         // The server counts this toward the monthly minutes
-        ...(entry.durationMs > 0 ? { 'X-Audio-Duration-Seconds': String(Math.ceil(entry.durationMs / 1000)) } : {}),
+        ...(durationMs > 0 ? { 'X-Audio-Duration-Seconds': String(Math.ceil(durationMs / 1000)) } : {}),
       },
       body: form,
       signal: controller.signal,
