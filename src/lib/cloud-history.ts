@@ -26,6 +26,12 @@ async function call(path: string, init?: RequestInit, asUser?: string): Promise<
   });
 }
 
+// The phone could not reach Wispra Cloud at all. React Native's fetch rejects with this TypeError
+// when there is no connection; any other error (a bug included) is not taken for a network problem.
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof TypeError && /network request failed|failed to fetch|network error|internet connection/i.test(err.message);
+}
+
 // A Wispra Cloud without these routes yet answers 404: nothing to do until it has them
 function unlessMissing(response: Response): Response {
   if (response.status === 404) throw new CloudUnavailable('Wispra Cloud has no shared history yet');
@@ -101,7 +107,7 @@ export async function deleteHistoryEntry(id: string, asUser: string): Promise<De
 // Deletes the whole history on every device of the account; returns the server's clearedAt
 export async function deleteAllHistory(asUser: string): Promise<string | null> {
   const response = await call('/api/history', { method: 'DELETE', body: JSON.stringify({ all: true }) }, asUser);
-  if (response.status === 405 || response.status === 404) throw new CloudUnavailable(NO_DELETE_ROUTES);
+  if (response.status === 405 || response.status === 404) throw new CloudUnavailable('Wispra Cloud cannot delete everything yet. Nothing was deleted.');
   if (!response.ok) throw new Error(await errorFrom(response, 'Deleting the shared history failed'));
   try {
     const body = (await response.json()) as { clearedAt?: unknown };

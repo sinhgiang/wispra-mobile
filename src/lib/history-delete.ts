@@ -7,12 +7,12 @@
 import { cloudId, type Entry } from './entries';
 
 /**
- * The phone's deletion state for ONE Wispra account, kept in pending-deletes.json. It is never used
- * for another account: a deletion made while signed in as A is never sent with B's sign-in, and
- * B's deletions are read from the start. Signing out drops it.
+ * The phone's deletion state for ONE Wispra account. Every account has its own (see DeletionBook):
+ * a deletion made while signed in as A is only ever sent as A, waits while another account is
+ * signed in, and is sent when A signs in again.
  */
 export interface PendingDeletes {
-  // The account this belongs to
+  // The account this belongs to (null: nobody is signed in; such a state is never saved)
   userId: string | null;
   // Cloud ids deleted on this phone that Wispra Cloud has not confirmed yet (one at a time; a
   // delete-all is never queued: it needs a connection)
@@ -29,29 +29,63 @@ export function emptyPendingDeletes(userId: string | null): PendingDeletes {
 
 export const NO_PENDING_DELETES: PendingDeletes = emptyPendingDeletes(null);
 
-// The state of `userId`: what belongs to another account (or to nobody) is dropped
-export function pendingFor(pending: PendingDeletes, userId: string | null): PendingDeletes {
-  return pending.userId === userId && userId !== null ? pending : emptyPendingDeletes(userId);
+/**
+ * pending-deletes.json: the state of every account that used this phone, by user id. It is read as
+ * it is when Wispra starts, before anyone is known to be signed in, and nothing is dropped then:
+ * which account's state is used is decided at each use, from the account signed in at that moment.
+ */
+export type DeletionBook = Readonly<Record<string, PendingDeletes>>;
+
+export const EMPTY_BOOK: DeletionBook = {};
+
+// The state of the account signed in now (empty when it has none yet, or nobody is signed in)
+export function stateOf(book: DeletionBook, userId: string | null): PendingDeletes {
+  return (userId !== null && book[userId]) || emptyPendingDeletes(userId);
 }
 
-export function parsePendingDeletes(text: string | null): PendingDeletes {
-  if (!text) return NO_PENDING_DELETES;
+// Stores one account's state; a state of nobody is not stored
+export function withState(book: DeletionBook, next: PendingDeletes): DeletionBook {
+  if (next.userId === null) return book;
+  return { ...book, [next.userId]: next };
+}
+
+function readState(userId: string, raw: unknown): PendingDeletes | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Partial<PendingDeletes>;
+  return {
+    userId,
+    ids: Array.isArray(r.ids) ? r.ids.filter((x): x is string => typeof x === 'string') : [],
+    since: typeof r.since === 'string' ? r.since : null,
+    clearedHandled: typeof r.clearedHandled === 'string' ? r.clearedHandled : null,
+  };
+}
+
+export function parseDeletionBook(text: string | null): DeletionBook {
+  if (!text) return EMPTY_BOOK;
   try {
-    const raw = JSON.parse(text) as Partial<PendingDeletes>;
-    return {
-      // A file written before deletions were tied to an account has no owner, so it is dropped
-      userId: typeof raw.userId === 'string' ? raw.userId : null,
-      ids: Array.isArray(raw.ids) ? raw.ids.filter((x): x is string => typeof x === 'string') : [],
-      since: typeof raw.since === 'string' ? raw.since : null,
-      clearedHandled: typeof raw.clearedHandled === 'string' ? raw.clearedHandled : null,
-    };
+    const raw = JSON.parse(text) as { accounts?: unknown; userId?: unknown };
+    const book: Record<string, PendingDeletes> = {};
+    if (raw.accounts && typeof raw.accounts === 'object') {
+      for (const [userId, state] of Object.entries(raw.accounts as Record<string, unknown>)) {
+        const s = readState(userId, state);
+        if (s) book[userId] = s;
+      }
+    } else if (typeof raw.userId === 'string') {
+      // The earlier one-account file: kept for that account
+      const s = readState(raw.userId, raw);
+      if (s) book[raw.userId] = s;
+    }
+    // A file from before deletions were tied to an account has no owner: nothing can be sent
+    return book;
   } catch {
-    return NO_PENDING_DELETES;
+    return EMPTY_BOOK;
   }
 }
 
-export function serializePendingDeletes(pending: PendingDeletes): string {
-  return JSON.stringify({ userId: pending.userId, ids: pending.ids, since: pending.since, clearedHandled: pending.clearedHandled });
+export function serializeDeletionBook(book: DeletionBook): string {
+  const accounts: Record<string, Omit<PendingDeletes, 'userId'>> = {};
+  for (const [userId, s] of Object.entries(book)) accounts[userId] = { ids: s.ids, since: s.since, clearedHandled: s.clearedHandled };
+  return JSON.stringify({ accounts });
 }
 
 // The entries "delete all" can remove: everything but a recording in progress

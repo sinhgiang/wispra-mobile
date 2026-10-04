@@ -18,21 +18,21 @@ import {
 } from './meeting';
 import { canSplitAudio, splitAudio } from '@/modules/wispra-dictation';
 import { askMeeting, makeMindMap, makeOutline, makePost } from './meeting-ai';
-import { CloudUnavailable, deleteAllHistory, deleteHistoryEntry, mergeHistory, readHistory } from './cloud-history';
+import { AccountChanged, CloudUnavailable, deleteAllHistory, deleteHistoryEntry, mergeHistory, readHistory } from './cloud-history';
 import { deleteEverything, queueDeletion, syncDeletes, type DeleteSyncCloud, type DeleteSyncStore } from './delete-sync';
-import { emptyPendingDeletes, NO_PENDING_DELETES, pendingFor, type PendingDeletes } from './history-delete';
+import { EMPTY_BOOK, stateOf, withState, type DeletionBook, type PendingDeletes } from './history-delete';
 import { batches, planSync, toHistoryEntry } from './history-sync';
 import {
   clearInbox,
   deleteAudio,
   loadEntries,
   loadHidden,
-  loadPendingDeletes,
+  loadDeletionBook,
   readInbox,
   removeEmptyLeftovers,
   saveEntries,
   saveHidden,
-  savePendingDeletes,
+  saveDeletionBook,
 } from './storage';
 import { CLOUD_UPLOAD_MAX_BYTES, transcribe, transcribeAudio, transcriptionAvailable } from './transcriber';
 
@@ -120,20 +120,25 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   const syncRef = useRef<(() => Promise<void>) | null>(null);
   // Computer dictations removed on this phone (see remove)
   const hidden = useRef<Set<string>>(new Set());
-  // Deletions not yet confirmed by Wispra Cloud (see history-delete.ts)
-  const pendingDeletes = useRef<PendingDeletes>(NO_PENDING_DELETES);
+  // Each account's deletions not yet confirmed by Wispra Cloud (see history-delete.ts). Read as it is
+  // at start; the account signed in is looked up at each use, never when the file is read.
+  const deletionBook = useRef<DeletionBook>(EMPTY_BOOK);
+  const myDeletes = useCallback((): PendingDeletes => stateOf(deletionBook.current, currentSession()?.userId ?? null), []);
   // When the history was last shared with Wispra Cloud, and why it was not, if it was not
   const [syncState, setSyncState] = useState<SyncState>({ at: null, note: null, waitingDeletes: 0 });
 
-  const setPendingDeletes = useCallback((next: PendingDeletes) => {
-    pendingDeletes.current = next;
-    try {
-      savePendingDeletes(next);
-    } catch {
-      // Kept in memory; tried again at the next change
-    }
-    setSyncState((prev) => ({ ...prev, waitingDeletes: next.ids.length }));
-  }, []);
+  const setPendingDeletes = useCallback(
+    (next: PendingDeletes) => {
+      deletionBook.current = withState(deletionBook.current, next);
+      try {
+        saveDeletionBook(deletionBook.current);
+      } catch {
+        // Kept in memory; tried again at the next change
+      }
+      setSyncState((prev) => ({ ...prev, waitingDeletes: myDeletes().ids.length }));
+    },
+    [myDeletes],
+  );
 
   // Returns whether the list reached the disk
   const commit = useCallback((next: Entry[]): boolean => {
@@ -176,12 +181,11 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       hidden.current = new Set();
     }
     try {
-      // Another account's deletions (or a file from before they were tied to one) are dropped
-      pendingDeletes.current = pendingFor(loadPendingDeletes(), currentSession()?.userId ?? null);
+      deletionBook.current = loadDeletionBook();
     } catch {
-      pendingDeletes.current = NO_PENDING_DELETES;
+      deletionBook.current = EMPTY_BOOK;
     }
-    setSyncState((prev) => ({ ...prev, waitingDeletes: pendingDeletes.current.ids.length }));
+    setSyncState((prev) => ({ ...prev, waitingDeletes: myDeletes().ids.length }));
     current.current = list;
     setEntries(list);
     setLoaded(true);
@@ -311,7 +315,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   const deleteStore = useMemo<DeleteSyncStore>(
     () => ({
       userId: () => currentSession()?.userId ?? null,
-      pending: () => pendingDeletes.current,
+      pending: myDeletes,
       setPending: (next) => setPendingDeletes(next),
       entries: () => current.current,
       removeLocal: (gone) => {
@@ -321,7 +325,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
         commit(current.current.filter((e) => !ids.has(e.id)));
       },
     }),
-    [commit, forget, setPendingDeletes],
+    [commit, forget, setPendingDeletes, myDeletes],
   );
 
   const remove = useCallback(
@@ -362,7 +366,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       if (!user) return;
 
       // 3. New dictations both ways; deleted ones are never brought back
-      const skip = new Set([...hidden.current, ...pendingDeletes.current.ids, ...page.deleted]);
+      const skip = new Set([...hidden.current, ...myDeletes().ids, ...page.deleted]);
       const plan = planSync(current.current, page.entries, skip, page.complete);
       if (plan.upserts.length > 0) {
         const incoming = new Map(plan.upserts.map((e) => [e.id, e]));
@@ -378,7 +382,10 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       }
       setSyncState((prev) => ({ ...prev, at: new Date().toISOString(), note: null }));
     } catch (err) {
-      setSyncState((prev) => ({ ...prev, note: err instanceof CloudUnavailable ? err.message : errorText(err) }));
+      // The account changed during the sync: the new account's own sync follows, nothing to say
+      if (!(err instanceof AccountChanged)) {
+        setSyncState((prev) => ({ ...prev, note: err instanceof CloudUnavailable ? err.message : errorText(err) }));
+      }
     } finally {
       syncing.current = false;
     }
@@ -602,9 +609,8 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     if (!loaded) return;
     void transcribeWaiting();
     const unsubscribe = onSignInChange((session) => {
-      // Signing out, or into another account, drops the previous account's deletions and cursor
-      const user = session?.userId ?? null;
-      if (pendingDeletes.current.userId !== user) setPendingDeletes(emptyPendingDeletes(user));
+      // Each account keeps its own deletions: the count shown is the one of the account signed in now
+      setSyncState((prev) => ({ ...prev, waitingDeletes: myDeletes().ids.length }));
       if (session) void transcribeWaiting();
     });
     const sub = AppState.addEventListener('change', (state) => {
@@ -614,7 +620,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       unsubscribe();
       sub.remove();
     };
-  }, [loaded, transcribeWaiting, setPendingDeletes]);
+  }, [loaded, transcribeWaiting, myDeletes]);
 
   const api = useMemo(
     () => ({

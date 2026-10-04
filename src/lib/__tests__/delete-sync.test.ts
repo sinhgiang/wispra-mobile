@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 
 import { FakeCloud, fakeAuth } from '../__fixtures__/fake-cloud';
 import { createEntry, type Entry } from '../entries';
-import { NO_PENDING_DELETES, parsePendingDeletes, pendingFor, serializePendingDeletes, type PendingDeletes } from '../history-delete';
+import { EMPTY_BOOK, emptyPendingDeletes, parseDeletionBook, serializeDeletionBook, stateOf, withState, type DeletionBook, type PendingDeletes } from '../history-delete';
 
 jest.mock('../cloud-auth', () => require('../__fixtures__/fake-cloud').fakeAuth);
 jest.mock('../cloud-config', () => ({ cloud: { apiBase: 'https://cloud.test' } }));
@@ -21,17 +21,17 @@ function dictation(over: Partial<Entry>): Entry {
 class FakeStore implements DeleteSyncStore {
   list: Entry[] = [];
   file: string | null = null;
-  private state: PendingDeletes = NO_PENDING_DELETES;
+  book: DeletionBook = EMPTY_BOOK;
 
   userId(): string | null {
     return fakeAuth.user;
   }
   pending(): PendingDeletes {
-    return this.state;
+    return stateOf(this.book, fakeAuth.user);
   }
   setPending(next: PendingDeletes): void {
-    this.state = next;
-    this.file = serializePendingDeletes(next);
+    this.book = withState(this.book, next);
+    this.file = serializeDeletionBook(this.book);
   }
   entries(): Entry[] {
     return this.list;
@@ -40,9 +40,9 @@ class FakeStore implements DeleteSyncStore {
     const ids = new Set(gone.map((e) => e.id));
     this.list = this.list.filter((e) => !ids.has(e.id));
   }
-  // What entries-store does when Wispra starts: read the file, keep it only for this account
+  // What entries-store does when Wispra starts: read the file as it is
   restart(): void {
-    this.state = pendingFor(parsePendingDeletes(this.file), fakeAuth.user);
+    this.book = parseDeletionBook(this.file);
   }
 }
 
@@ -78,7 +78,7 @@ describe('the requests the phone sends', () => {
   });
 
   it('reads the history after the deletions, then sends since = the last serverTime', async () => {
-    store.setPending({ ...pendingFor(NO_PENDING_DELETES, 'user-a'), ids: ['pc-1'] });
+    store.setPending({ ...emptyPendingDeletes('user-a'), ids: ['pc-1'] });
     await syncDeletes(store, realCloud, phoneClock);
     expect(server.requests.map((r) => `${r.method} ${r.path}`)).toEqual(['DELETE /api/history/pc-1', 'GET /api/history?limit=500']);
     expect(store.pending()).toMatchObject({ ids: [], since: '2026-10-05T12:00:00.000Z' });
@@ -89,7 +89,7 @@ describe('the requests the phone sends', () => {
   });
 
   it('does not move since when the read fails', async () => {
-    store.setPending({ ...pendingFor(NO_PENDING_DELETES, 'user-a'), since: '2026-10-05T11:00:00.000Z' });
+    store.setPending({ ...emptyPendingDeletes('user-a'), since: '2026-10-05T11:00:00.000Z' });
     server.offline = true;
     await expect(syncDeletes(store, realCloud, phoneClock)).rejects.toThrow('Network request failed');
     expect(store.pending().since).toBe('2026-10-05T11:00:00.000Z');
@@ -99,7 +99,7 @@ describe('the requests the phone sends', () => {
 describe('one id that fails does not hold the others', () => {
   it('drops ids refused for good (400, 404), keeps a server error to retry, and still sends the rest', async () => {
     server.failFor.set('bad-400', 400).set('gone-404', 404).set('busy-500', 500);
-    store.setPending({ ...pendingFor(NO_PENDING_DELETES, 'user-a'), ids: ['bad-400', 'gone-404', 'busy-500', 'pc-ok'] });
+    store.setPending({ ...emptyPendingDeletes('user-a'), ids: ['bad-400', 'gone-404', 'busy-500', 'pc-ok'] });
     const result = await syncDeletes(store, realCloud, phoneClock);
     expect(deletesBy('user-a').map((r) => r.path)).toEqual([
       '/api/history/bad-400',
@@ -118,7 +118,7 @@ describe('one id that fails does not hold the others', () => {
 
   it('keeps every id while Wispra Cloud has no delete routes, and still reads the history', async () => {
     server.hasDeleteRoutes = false;
-    store.setPending({ ...pendingFor(NO_PENDING_DELETES, 'user-a'), ids: ['pc-1', 'pc-2'] });
+    store.setPending({ ...emptyPendingDeletes('user-a'), ids: ['pc-1', 'pc-2'] });
     const result = await syncDeletes(store, realCloud, phoneClock);
     expect(deletesBy('user-a')).toHaveLength(1);
     expect(store.pending().ids).toEqual(['pc-1', 'pc-2']);
@@ -132,39 +132,76 @@ describe('one id that fails does not hold the others', () => {
   });
 });
 
-describe('another account never gets the previous account’s deletions', () => {
-  it('drops A’s queue, since and handled clear when B is signed in, and sends nothing of A with B’s sign-in', async () => {
-    store.setPending({ userId: 'user-a', ids: ['a-dictation'], since: '2026-10-05T11:59:00.000Z', clearedHandled: '2026-10-05T11:30:00.000Z' });
+describe('each account keeps its own deletions', () => {
+  const aState = { userId: 'user-a', ids: ['a-dictation'], since: '2026-10-05T11:59:00.000Z', clearedHandled: '2026-10-05T11:30:00.000Z' };
+
+  it('signed in as B: sends nothing of A, reads B from the start, and leaves A’s state alone', async () => {
+    store.setPending(aState);
     fakeAuth.user = 'user-b';
     server.account('user-b').marks.push({ id: 'b-old', deletedAt: '2026-10-05T10:00:00.000Z' });
     store.list = [dictation({ id: 'b-old', source: 'computer' })];
 
     await syncDeletes(store, realCloud, phoneClock);
     expect(deletesBy('user-b')).toEqual([]);
+    expect(deletesBy('user-a')).toEqual([]);
     expect(server.requests[0]).toMatchObject({ method: 'GET', path: '/api/history?limit=500', user: 'user-b' });
     // B's own older deletions are read from the start, not from A's since
     expect(store.list).toEqual([]);
     expect(store.pending()).toEqual({ userId: 'user-b', ids: [], since: '2026-10-05T12:00:00.000Z', clearedHandled: null });
+    expect(store.book['user-a']).toEqual(aState);
   });
 
-  it('drops them when Wispra restarts signed in as another account, or signed out', () => {
-    store.setPending({ userId: 'user-a', ids: ['a-dictation'], since: null, clearedHandled: null });
+  it('back to A: A’s waiting deletion is sent as A, with A’s since', async () => {
+    store.setPending(aState);
     fakeAuth.user = 'user-b';
-    store.restart();
-    expect(store.pending()).toEqual({ userId: 'user-b', ids: [], since: null, clearedHandled: null });
-    fakeAuth.user = null;
-    store.restart();
+    await syncDeletes(store, realCloud, phoneClock);
+    fakeAuth.user = null; // signed out
+    expect(store.pending().ids).toEqual([]);
+    fakeAuth.user = 'user-a';
+    await syncDeletes(store, realCloud, phoneClock);
+    expect(deletesBy('user-a').map((r) => r.path)).toEqual(['/api/history/a-dictation']);
+    expect(server.requests.at(-1)?.path).toBe('/api/history?limit=500&since=2026-10-05T11%3A59%3A00.000Z');
     expect(store.pending().ids).toEqual([]);
   });
 
-  it('keeps them across a restart of the same account', () => {
-    store.setPending({ userId: 'user-a', ids: ['pc-1'], since: '2026-10-05T11:00:00.000Z', clearedHandled: null });
+  it('survives the start of Wispra: the file is read before the sign-in is known, then A’s state is used', async () => {
+    store.setPending(aState);
+    store.setPending({ userId: 'user-b', ids: ['b-dictation'], since: null, clearedHandled: null });
+    // Wispra starts: entries load before the saved sign-in (loadSession is async, in the parent)
+    fakeAuth.user = null;
     store.restart();
-    expect(store.pending()).toEqual({ userId: 'user-a', ids: ['pc-1'], since: '2026-10-05T11:00:00.000Z', clearedHandled: null });
+    expect(store.pending()).toEqual({ userId: null, ids: [], since: null, clearedHandled: null });
+    // A signing out while nobody is known writes nothing for nobody
+    store.setPending(store.pending());
+    // Then the saved sign-in of A is loaded
+    fakeAuth.user = 'user-a';
+    expect(store.pending()).toEqual(aState);
+    await syncDeletes(store, realCloud, phoneClock);
+    expect(deletesBy('user-a').map((r) => r.path)).toEqual(['/api/history/a-dictation']);
+    expect(server.requests.at(-1)?.path).toBe('/api/history?limit=500&since=2026-10-05T11%3A59%3A00.000Z');
+    // B's deletion still waits for B
+    expect(store.book['user-b']?.ids).toEqual(['b-dictation']);
+    // And everything is still in the file after another restart
+    store.restart();
+    expect(store.book['user-b']?.ids).toEqual(['b-dictation']);
+    expect(store.book['user-a']?.since).toBe('2026-10-05T12:00:00.000Z');
+  });
+
+  it('keeps the handled clear across a restart, so a clear is never applied twice', async () => {
+    server.account('user-a').entries = [{ id: 'pc-1', text: 'x', createdAt: at.toISOString() }];
+    store.list = [dictation({ id: 'pc-1', source: 'computer' })];
+    await deleteEverything(store, realCloud, ['pc-1'], 'user-a');
+    fakeAuth.user = null;
+    store.restart();
+    fakeAuth.user = 'user-a';
+    // Made just before the server's clear time, but after the phone's own clear
+    store.list = [dictation({ id: 'mobile-arrived-after', createdAt: '2026-10-05T11:59:00.000Z' })];
+    await syncDeletes(store, realCloud, phoneClock);
+    expect(store.list.map((e) => e.id)).toEqual(['mobile-arrived-after']);
   });
 
   it('stops before the next request when the account changes during a sync', async () => {
-    store.setPending({ ...pendingFor(NO_PENDING_DELETES, 'user-a'), ids: ['a-1', 'a-2'] });
+    store.setPending({ ...emptyPendingDeletes('user-a'), ids: ['a-1', 'a-2'] });
     const switching: DeleteSyncCloud = {
       ...realCloud,
       deleteOne: async (id, asUser) => {

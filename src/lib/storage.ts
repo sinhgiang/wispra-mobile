@@ -1,7 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
 import { entryFromInbox, parseEntries, parseInboxRecord, serializeEntries, type Entry } from './entries';
-import { parsePendingDeletes, serializePendingDeletes, type PendingDeletes } from './history-delete';
+import { parseDeletionBook, serializeDeletionBook, type DeletionBook } from './history-delete';
 
 // Everything lives in the app's document directory, which the system never clears on its own
 // (unlike the cache directory).
@@ -69,17 +69,17 @@ export function saveHidden(ids: Set<string>): void {
 }
 
 // Deletions Wispra Cloud has not confirmed yet, and the time of the last list of deletions read
-export function loadPendingDeletes(): PendingDeletes {
+export function loadDeletionBook(): DeletionBook {
   const file = new File(root, 'pending-deletes.json');
-  return parsePendingDeletes(file.exists ? file.textSync() : null);
+  return parseDeletionBook(file.exists ? file.textSync() : null);
 }
 
-export function savePendingDeletes(pending: PendingDeletes): void {
+export function saveDeletionBook(book: DeletionBook): void {
   ensureDirs();
   const tmp = new File(root, 'pending-deletes.json.tmp');
   if (tmp.exists) tmp.delete();
   tmp.create();
-  tmp.write(serializePendingDeletes(pending));
+  tmp.write(serializeDeletionBook(book));
   tmp.moveSync(new File(root, 'pending-deletes.json'), { overwrite: true });
 }
 

@@ -5,18 +5,19 @@
 //   3. delete on the phone what other devices deleted (ids, and a new "delete everything")
 //   4. remember `since` and the handled clear, only after the answer was handled
 // Everything is for the account signed in when the sync starts; if it changes on the way, the sync
-// stops without sending or writing anything more.
+// stops without sending or writing anything more. Each account keeps its own state (DeletionBook):
+// another account's deletions wait until that account signs in again.
 
 import type { Entry } from './entries';
 import { AccountChanged, CloudUnavailable, type DeleteOutcome, type HistoryPage } from './cloud-history';
-import { applyRemoteDeletes, clearedBefore, dropIds, pendingFor, queueDelete, type PendingDeletes } from './history-delete';
+import { applyRemoteDeletes, clearedBefore, dropIds, queueDelete, type PendingDeletes } from './history-delete';
 
 export interface DeleteSyncStore {
   // The account signed in now, or null
   userId(): string | null;
-  // The latest saved state (read again after every await)
+  // The latest state of the account signed in now (read again after every await)
   pending(): PendingDeletes;
-  // Saves it (pending-deletes.json in the app)
+  // Saves the state of next.userId (pending-deletes.json in the app); other accounts keep theirs
   setPending(next: PendingDeletes): void;
   // The latest entries on the phone
   entries(): Entry[];
@@ -30,23 +31,14 @@ export interface DeleteSyncCloud {
   read(since: string | null, asUser: string): Promise<HistoryPage>;
 }
 
-// The state of the signed-in account; another account's state is dropped and saved as dropped
-export function ownState(store: DeleteSyncStore): PendingDeletes {
-  const user = store.userId();
-  const pending = store.pending();
-  const own = pendingFor(pending, user);
-  if (own !== pending) store.setPending(own);
-  return own;
-}
-
 function sameAccount(store: DeleteSyncStore, user: string): void {
-  if (store.userId() !== user || store.pending().userId !== user) throw new AccountChanged();
+  if (store.userId() !== user) throw new AccountChanged();
 }
 
 // One entry deleted on the phone: queued for Wispra Cloud when signed in and it is there
 export function queueDeletion(store: DeleteSyncStore, entry: Entry): void {
   if (!store.userId()) return;
-  store.setPending(queueDelete(ownState(store), [entry]));
+  store.setPending(queueDelete(store.pending(), [entry]));
 }
 
 export interface DeleteSyncResult {
@@ -61,7 +53,6 @@ export interface DeleteSyncResult {
 export async function syncDeletes(store: DeleteSyncStore, cloud: DeleteSyncCloud, now: () => Date): Promise<DeleteSyncResult | null> {
   const user = store.userId();
   if (!user) return null;
-  ownState(store);
 
   // 1. This phone's deletions first, so the history read next cannot bring them back
   for (const id of [...store.pending().ids]) {
@@ -121,7 +112,6 @@ export async function deleteEverything(
   if (user !== asUser) throw new AccountChanged();
   const ids = new Set(shown);
   if (user) {
-    ownState(store);
     const clearedAt = await cloud.deleteAll(user);
     sameAccount(store, user);
     // Wispra Cloud no longer has anything to delete for the queued ids; this clear is not applied

@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 
 import { createEntry, type Entry } from '../entries';
 import {
@@ -10,13 +10,21 @@ import {
   deleteOneWarning,
   dropIds,
   emptyPendingDeletes,
+  EMPTY_BOOK,
   NO_PENDING_DELETES,
-  parsePendingDeletes,
-  pendingFor,
+  parseDeletionBook,
   queueDelete,
-  serializePendingDeletes,
+  serializeDeletionBook,
+  stateOf,
+  withState,
 } from '../history-delete';
 import { planSync, type HistoryEntry } from '../history-sync';
+
+jest.mock('../cloud-auth', () => ({ currentSession: () => null, validToken: async () => null }));
+jest.mock('../cloud-config', () => ({ cloud: { apiBase: 'https://cloud.test' } }));
+
+// eslint-disable-next-line import/first
+import { isNetworkError } from '../cloud-history';
 
 const at = new Date('2026-10-05T08:00:00.000Z');
 
@@ -112,24 +120,44 @@ describe('the deletion queue', () => {
     expect(dropIds(p, ['mobile-a']).ids).toEqual(['pc-1']);
   });
 
-  it('belongs to one account: another account, or none, starts empty', () => {
+  it('keeps one state per account: another account, or nobody, sees an empty one', () => {
     const a = { ...queueDelete(mine, [shared]), since: '2026-10-05T09:00:00.000Z', clearedHandled: '2026-10-05T08:30:00.000Z' };
-    expect(pendingFor(a, 'user-a')).toBe(a);
-    expect(pendingFor(a, 'user-b')).toEqual(emptyPendingDeletes('user-b'));
-    expect(pendingFor(a, null)).toEqual(NO_PENDING_DELETES);
+    const book = withState(EMPTY_BOOK, a);
+    expect(stateOf(book, 'user-a')).toBe(a);
+    expect(stateOf(book, 'user-b')).toEqual(emptyPendingDeletes('user-b'));
+    expect(stateOf(book, null)).toEqual(NO_PENDING_DELETES);
+    const both = withState(book, { ...emptyPendingDeletes('user-b'), ids: ['pc-9'] });
+    expect(stateOf(both, 'user-a')).toBe(a);
+    expect(stateOf(both, 'user-b').ids).toEqual(['pc-9']);
   });
 
-  it('is saved and read back with its account (pending-deletes.json)', () => {
-    const a = { userId: 'user-a', ids: ['pc-1'], since: '2026-10-05T09:00:00.000Z', clearedHandled: '2026-10-05T08:30:00.000Z' };
-    expect(parsePendingDeletes(serializePendingDeletes(a))).toEqual(a);
+  it('never stores a state of nobody', () => {
+    expect(withState(EMPTY_BOOK, { ...NO_PENDING_DELETES, ids: ['pc-1'] })).toBe(EMPTY_BOOK);
   });
 
-  it('drops a file without an account, an old format or a broken file', () => {
-    const old = parsePendingDeletes(JSON.stringify({ ids: ['pc-1'], all: true, since: null }));
-    expect(old.userId).toBeNull();
-    expect(pendingFor(old, 'user-a')).toEqual(emptyPendingDeletes('user-a'));
-    expect(parsePendingDeletes('{nope')).toEqual(NO_PENDING_DELETES);
-    expect(parsePendingDeletes(null)).toEqual(NO_PENDING_DELETES);
+  it('is saved and read back with every account (pending-deletes.json)', () => {
+    const book = withState(
+      withState(EMPTY_BOOK, { userId: 'user-a', ids: ['pc-1'], since: '2026-10-05T09:00:00.000Z', clearedHandled: '2026-10-05T08:30:00.000Z' }),
+      { userId: 'user-b', ids: [], since: null, clearedHandled: null },
+    );
+    expect(parseDeletionBook(serializeDeletionBook(book))).toEqual(book);
+  });
+
+  it('reads the earlier one-account file for its account, and drops one without an owner or a broken file', () => {
+    const one = parseDeletionBook(JSON.stringify({ userId: 'user-a', ids: ['pc-1'], since: null, clearedHandled: null }));
+    expect(stateOf(one, 'user-a').ids).toEqual(['pc-1']);
+    expect(parseDeletionBook(JSON.stringify({ ids: ['pc-1'], all: true, since: null }))).toEqual(EMPTY_BOOK);
+    expect(parseDeletionBook('{nope')).toEqual(EMPTY_BOOK);
+    expect(parseDeletionBook(null)).toEqual(EMPTY_BOOK);
+  });
+});
+
+describe('telling a lost connection from other errors', () => {
+  it('takes only a failed request for a network problem', () => {
+    expect(isNetworkError(new TypeError('Network request failed'))).toBe(true);
+    expect(isNetworkError(new TypeError('Failed to fetch'))).toBe(true);
+    expect(isNetworkError(new TypeError("Cannot read properties of undefined (reading 'id')"))).toBe(false);
+    expect(isNetworkError(new Error('Network request failed'))).toBe(false);
   });
 });
 

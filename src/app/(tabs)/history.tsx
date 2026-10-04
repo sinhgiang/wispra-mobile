@@ -9,7 +9,7 @@ import { Button, Chip, Label, Title, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { filterEntries, groupByDay, type Entry, type KindFilter } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
-import { CloudUnavailable } from '@/lib/cloud-history';
+import { isNetworkError } from '@/lib/cloud-history';
 import { DELETE_ALL_NEEDS_CONNECTION, deletableEntries, deleteAllWarning, deletedAllMessage } from '@/lib/history-delete';
 import { useSession } from '@/lib/use-session';
 
@@ -33,9 +33,9 @@ export default function HistoryScreen() {
         (err: unknown) =>
           Alert.alert(
             'Nothing was deleted',
-            err instanceof CloudUnavailable || err instanceof TypeError
+            isNetworkError(err)
               ? DELETE_ALL_NEEDS_CONNECTION
-              : `${err instanceof Error ? err.message : String(err)} Nothing was deleted.`,
+              : `${err instanceof Error ? err.message : String(err)}${/Nothing was (deleted|sent)/.test(String(err)) ? '' : ' Nothing was deleted.'}`,
           ),
       );
     });
