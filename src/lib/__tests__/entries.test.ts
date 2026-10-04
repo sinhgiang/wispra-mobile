@@ -4,11 +4,13 @@ import {
   createEntry,
   dayLabel,
   defaultMeetingTitle,
+  entryFromInbox,
   filterEntries,
   formatDuration,
   groupByDay,
   matchesQuery,
   parseEntries,
+  parseInboxRecord,
   previewText,
   recoverInterrupted,
   serializeEntries,
@@ -83,6 +85,35 @@ describe('formatting', () => {
     const m = { ...createEntry('meeting', new Date(), 'm'), durationMs: 125_000, bookmarks: [1000] };
     expect(previewText(m)).toBe('2:05 · 1 bookmark');
     expect(previewText({ ...m, text: 'hello   world' })).toBe('hello world');
+  });
+});
+
+describe('dictations from the mic button in other apps', () => {
+  // Same text as InboxEntryTest.kt writes, so both sides agree on the format
+  const json =
+    '{"version":1,"id":"abc","kind":"dictation","createdAt":"2026-10-04T12:00:00.000Z",' +
+    '"durationMs":4200,"audioFileName":"abc.m4a","sourceApp":"Zalo \\"chat\\"","text":null}';
+
+  it('reads what the Android service writes', () => {
+    expect(parseInboxRecord(json)).toEqual({
+      id: 'abc',
+      createdAt: '2026-10-04T12:00:00.000Z',
+      durationMs: 4200,
+      audioFileName: 'abc.m4a',
+      sourceApp: 'Zalo "chat"',
+      text: null,
+    });
+  });
+
+  it('waits for transcription when there is no text yet, and is done when there is', () => {
+    const record = parseInboxRecord(json)!;
+    expect(entryFromInbox(record, 'file:///a.m4a')).toMatchObject({ kind: 'dictation', title: 'Zalo "chat"', status: 'pending' });
+    expect(entryFromInbox({ ...record, text: 'Xin chào' }, null)).toMatchObject({ status: 'done', text: 'Xin chào' });
+  });
+
+  it('ignores broken files', () => {
+    expect(parseInboxRecord('{')).toBeNull();
+    expect(parseInboxRecord('{"id":"x"}')).toBeNull();
   });
 });
 

@@ -1,6 +1,6 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
-import { parseEntries, serializeEntries, type Entry } from './entries';
+import { entryFromInbox, parseEntries, parseInboxRecord, serializeEntries, type Entry } from './entries';
 
 // Everything lives in the app's document directory, which the system never clears on its own
 // (unlike the cache directory).
@@ -43,6 +43,37 @@ export function keepAudio(uri: string): string {
   if (!file.exists || file.uri.startsWith(audioDir.uri)) return file.uri;
   file.moveSync(audioDir);
   return file.uri;
+}
+
+// Dictations made with the mic button over other apps wait here (written by the Android service)
+const inboxDir = new Directory(root, 'inbox');
+
+export interface InboxItem {
+  entry: Entry;
+  note: File;
+}
+
+// Reads every finished dictation in the inbox and moves its audio to the audio folder. The notes
+// stay until clearInbox(), which is called only after the entries are saved, so a crash in between
+// reads them again (the audio is then found in the audio folder).
+export function readInbox(): InboxItem[] {
+  if (!inboxDir.exists) return [];
+  ensureDirs();
+  const items: InboxItem[] = [];
+  for (const note of inboxDir.list()) {
+    if (!(note instanceof File) || !note.name.endsWith('.json')) continue;
+    const record = parseInboxRecord(note.textSync());
+    if (!record) continue;
+    const waiting = new File(inboxDir, record.audioFileName);
+    if (waiting.exists) waiting.moveSync(audioDir);
+    const kept = new File(audioDir, record.audioFileName);
+    items.push({ entry: entryFromInbox(record, kept.exists ? kept.uri : null), note });
+  }
+  return items;
+}
+
+export function clearInbox(items: InboxItem[]): void {
+  for (const { note } of items) if (note.exists) note.delete();
 }
 
 export function deleteAudio(uri: string | null): void {

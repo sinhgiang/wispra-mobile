@@ -51,7 +51,8 @@ export function PendingCard({ entry, onPress }: { entry: Entry; onPress?: () => 
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={styles.pending}>
       <Text style={styles.pendingTitle}>
-        {entry.kind === 'meeting' ? entry.title : 'Recording'} not transcribed yet · {formatDuration(entry.durationMs)}
+        {entry.kind === 'meeting' || entry.title !== 'Dictation' ? entry.title : 'Recording'} not transcribed yet ·{' '}
+        {formatDuration(entry.durationMs)}
       </Text>
       <Text style={styles.pendingNote}>{entry.error ?? 'The audio is kept on this phone.'}</Text>
       <View style={styles.actions}>

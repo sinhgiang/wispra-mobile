@@ -185,6 +185,50 @@ export function parseEntries(json: string): Entry[] {
   }));
 }
 
+// A dictation made with the mic button over another app. The Android service leaves it in
+// wispra/inbox as JSON (see InboxEntry.kt) because the app's JavaScript may not be running then.
+export interface InboxRecord {
+  id: string;
+  createdAt: string;
+  durationMs: number;
+  audioFileName: string;
+  sourceApp: string | null;
+  text: string | null;
+}
+
+export function parseInboxRecord(json: string): InboxRecord | null {
+  let v: Partial<InboxRecord> & { kind?: unknown };
+  try {
+    v = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!v || typeof v.id !== 'string' || typeof v.createdAt !== 'string' || typeof v.audioFileName !== 'string') return null;
+  return {
+    id: v.id,
+    createdAt: v.createdAt,
+    durationMs: typeof v.durationMs === 'number' ? v.durationMs : 0,
+    audioFileName: v.audioFileName,
+    sourceApp: typeof v.sourceApp === 'string' ? v.sourceApp : null,
+    text: typeof v.text === 'string' && v.text.trim() ? v.text : null,
+  };
+}
+
+export function entryFromInbox(record: InboxRecord, audioUri: string | null): Entry {
+  return {
+    id: record.id,
+    kind: 'dictation',
+    title: record.sourceApp ?? 'Dictation',
+    createdAt: record.createdAt,
+    durationMs: record.durationMs,
+    status: record.text ? 'done' : 'pending',
+    audioUri,
+    text: record.text,
+    error: null,
+    bookmarks: [],
+  };
+}
+
 export function serializeEntries(entries: Entry[]): string {
   return JSON.stringify({ version: 1, entries }, null, 1);
 }

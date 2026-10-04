@@ -1,0 +1,33 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+  <!-- Lets the service read the name of the app a dictation was made in ("Messages", "Zalo") for
+       History. Since Android 11 other apps' names are hidden unless declared here. -->
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.MAIN" />
+      <category android:name="android.intent.category.LAUNCHER" />
+    </intent>
+  </queries>
+
+  <application>
+    <!-- Shows the Wispra mic button above the text field the user taps in another app.
+         Runs only after the user turns it on in Settings > Accessibility. -->
+    <service
+      android:name="expo.modules.wispradictation.WispraAccessibilityService"
+      android:label="@string/wispra_a11y_label"
+      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+      android:foregroundServiceType="microphone"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="android.accessibilityservice.AccessibilityService" />
+      </intent-filter>
+      <meta-data
+        android:name="android.accessibilityservice"
+        android:resource="@xml/wispra_accessibility" />
+    </service>
+  </application>
+</manifest>

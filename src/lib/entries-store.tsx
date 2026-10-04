@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Alert } from 'react-native';
+import { Alert, AppState } from 'react-native';
 
 import { recoverInterrupted, type Entry } from './entries';
-import { deleteAudio, loadEntries, saveEntries } from './storage';
+import { clearInbox, deleteAudio, loadEntries, readInbox, saveEntries } from './storage';
 import { transcribe } from './transcriber';
 
 interface EntriesApi {
@@ -23,28 +23,54 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false);
   // The latest list, for saving and for callbacks that must not go stale
   const current = useRef<Entry[]>([]);
+  // When the saved list could not be read, nothing is written, so it is never replaced by an empty one
+  const readFailed = useRef(false);
 
-  const commit = useCallback((next: Entry[]) => {
+  // Returns whether the list reached the disk
+  const commit = useCallback((next: Entry[]): boolean => {
     current.current = next;
     setEntries(next);
+    if (readFailed.current) return false;
     try {
       saveEntries(next);
+      return true;
     } catch (err) {
       Alert.alert('Could not save', err instanceof Error ? err.message : String(err));
+      return false;
     }
   }, []);
+
+  // Brings in dictations made with the mic button over other apps (Android) while Wispra was closed
+  const importInbox = useCallback(() => {
+    try {
+      const items = readInbox();
+      if (items.length === 0) return;
+      const known = new Set(current.current.map((e) => e.id));
+      const fresh = items.map((i) => i.entry).filter((e) => !known.has(e.id));
+      if (commit([...fresh, ...current.current])) clearInbox(items);
+    } catch (err) {
+      Alert.alert('Could not bring in a dictation', err instanceof Error ? err.message : String(err));
+    }
+  }, [commit]);
 
   useEffect(() => {
     let list: Entry[] = [];
     try {
       list = recoverInterrupted(loadEntries());
     } catch (err) {
-      Alert.alert('Could not read your recordings', err instanceof Error ? err.message : String(err));
+      readFailed.current = true;
+      const reason = err instanceof Error ? err.message : String(err);
+      Alert.alert('Could not read your recordings', `${reason}. Nothing is changed on this phone until Wispra restarts.`);
     }
     current.current = list;
     setEntries(list);
     setLoaded(true);
-  }, []);
+    importInbox();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') importInbox();
+    });
+    return () => sub.remove();
+  }, [importInbox]);
 
   const get = useCallback((id: string) => current.current.find((e) => e.id === id), []);
 

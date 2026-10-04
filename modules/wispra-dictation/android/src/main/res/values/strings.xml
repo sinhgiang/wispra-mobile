@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="wispra_a11y_label">Wispra mic button</string>
+  <string name="wispra_a11y_summary">Shows a mic button above the text field you tap, so you can dictate into any app.</string>
+  <string name="wispra_a11y_description">Wispra uses this service only to find the text field you tapped, to show its mic button next to it, and to type your dictated words into that field. It does not read the rest of the screen, records nothing until you tap the mic, and does not collect or share what you type.</string>
+  <string name="wispra_recording_channel">Dictation</string>
+  <string name="wispra_recording_notice">Wispra is listening</string>
+</resources>

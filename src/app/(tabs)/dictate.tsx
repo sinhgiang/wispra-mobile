@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,6 +10,7 @@ import { formatDuration, sortEntries } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
 import { transcriptionAvailable } from '@/lib/transcriber';
 import { useRecording } from '@/lib/use-recording';
+import { bubbleSupported, isServiceEnabled } from '@/modules/wispra-dictation';
 
 export default function DictateScreen() {
   const rec = useRecording('dictation');
@@ -65,12 +66,7 @@ export default function DictateScreen() {
           ) : null}
         </Card>
 
-        <Card>
-          <Text style={styles.cardTitle}>Dictate into any app</Text>
-          <Body style={styles.note}>
-            A mic button on Android and the Wispra keyboard on iPhone are coming in a later update.
-          </Body>
-        </Card>
+        <AnyAppCard />
 
         {recent.length > 0 ? (
           <View style={styles.list}>
@@ -85,7 +81,41 @@ export default function DictateScreen() {
   );
 }
 
+// Android: the mic button over other apps' text fields. iPhone: the Wispra keyboard, still to come.
+function AnyAppCard() {
+  const [on, setOn] = useState(isServiceEnabled);
+  useFocusEffect(useCallback(() => setOn(isServiceEnabled()), []));
+
+  if (!bubbleSupported) {
+    return (
+      <Card>
+        <Text style={styles.cardTitle}>Dictate into any app</Text>
+        <Body style={styles.note}>The Wispra keyboard for iPhone is coming in a later update.</Body>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <View style={styles.cardHead}>
+        <Text style={styles.cardTitle}>Dictate into any app</Text>
+        <Text style={[styles.status, on && { color: W.green }]}>{on ? 'On' : 'Off'}</Text>
+      </View>
+      <Body style={styles.note}>
+        {on
+          ? 'Tap a text field in any app and the Wispra mic appears above it.'
+          : 'Show a Wispra mic above the text field you tap in any app, such as Messenger, Zalo or Gmail.'}
+      </Body>
+      <View style={styles.cardAction}>
+        <Button small kind={on ? 'secondary' : 'primary'} label={on ? 'Settings' : 'Set up'} onPress={() => router.push('/dictation-setup')} />
+      </View>
+    </Card>
+  );
+}
+
 const styles = StyleSheet.create({
+  cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  status: { color: W.muted, fontSize: 13, fontWeight: '600' },
+  cardAction: { flexDirection: 'row' },
   content: { padding: Gap.xl, paddingTop: Gap.xl + 16, gap: Gap.l },
   recorder: { alignItems: 'center', paddingVertical: 28, gap: Gap.l },
   mic: { width: 88, height: 88, borderRadius: 44, backgroundColor: W.accent, alignItems: 'center', justifyContent: 'center' },
