@@ -1,0 +1,47 @@
+# Checks that the iOS app, the Wispra keyboard extension among it, compiles, on GitHub's macOS
+# machines (free for this public repository). Nothing is signed, uploaded or sent to Apple; the
+# signed TestFlight build stays on Codemagic (codemagic.yaml), started by hand. This only catches
+# compile errors early, before anyone presses a button there.
+
+name: iOS compile check
+
+on:
+  push:
+    branches:
+      - 'helme/mobile-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Generate the iOS project
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install CocoaPods
+        run: cd ios && pod install
+
+      - name: Build for a device without signing
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/Wispra.xcworkspace -scheme Wispra \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 200
