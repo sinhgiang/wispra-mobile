@@ -11,7 +11,10 @@
     ],
     "userInterfaceStyle": "dark",
     "ios": {
-      "bundleIdentifier": "com.sinhgiang.wispramobile"
+      "bundleIdentifier": "com.sinhgiang.wispramobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.sinhgiang.wispramobile",
