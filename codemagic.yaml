@@ -32,6 +32,62 @@ workflows:
     artifacts:
       - /tmp/xcodebuild_logs/*.log
 
+  # Run once before the first TestFlight build. Creates, in the Apple Developer account, the App
+  # Store provisioning profile for com.sinhgiang.wispramobile, tied to the team's valid
+  # distribution certificates (the one Codemagic generated for Lenvid among them), using the App
+  # Store Connect API key lenvid-asc. "Fetch profiles" in Codemagic only lists profiles that already
+  # exist there; after this run it lists this one. Needs no secret: the integration supplies the API
+  # key, and making a profile needs only the certificates' ids, never their private keys. Does
+  # nothing when the profile is already there. Signs nothing and uploads nothing.
+  ios-create-profile:
+    name: 'iOS: create App Store profile'
+    max_build_duration: 15
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: lenvid-asc
+    environment:
+      vars:
+        BUNDLE_ID: com.sinhgiang.wispramobile
+        PROFILE_NAME: Wispra App Store
+    scripts:
+      - name: Create the App Store profile if it is missing
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          # Ids from the JSON the Codemagic CLI prints (a list of Apple resources)
+          ids() {
+            python3 -c '
+          import json, sys, datetime
+          data = json.load(sys.stdin)
+          now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          for item in data:
+              exp = (item.get("attributes") or {}).get("expirationDate")
+              if exp is None or exp > now:
+                  print(item["id"])
+          '
+          }
+          existing=$(app-store-connect profiles list --type IOS_APP_STORE --name "$PROFILE_NAME" --state ACTIVE --json | ids)
+          if [ -n "$existing" ]; then
+            echo "The profile '$PROFILE_NAME' already exists. Nothing to do."
+            exit 0
+          fi
+          bundle=$(app-store-connect bundle-ids list --bundle-id-identifier "$BUNDLE_ID" --strict-match-identifier --json | ids | head -n 1)
+          if [ -z "$bundle" ]; then
+            echo "The bundle ID $BUNDLE_ID is not registered in the Apple Developer account."
+            exit 1
+          fi
+          certs=$( { app-store-connect certificates list --type DISTRIBUTION --json | ids; app-store-connect certificates list --type IOS_DISTRIBUTION --json | ids; } | sort -u)
+          if [ -z "$certs" ]; then
+            echo "No valid distribution certificate in the Apple Developer account."
+            exit 1
+          fi
+          echo "Distribution certificates found: $(echo "$certs" | wc -l | tr -d ' ')"
+          # shellcheck disable=SC2086
+          app-store-connect profiles create "$bundle" --type IOS_APP_STORE --name "$PROFILE_NAME" --certificate-ids $certs
+          echo "Created the App Store profile '$PROFILE_NAME' for $BUNDLE_ID."
+          echo "Next: Codemagic > Team settings > codemagic.yaml settings > Code signing identities >"
+          echo "iOS provisioning profiles > Fetch profiles, select it, Reference name wispra-app-store, Download selected."
+
   # Signed build, uploaded to App Store Connect so it appears in TestFlight for internal
   # testers. It is never sent to App Review or to external beta review: those stay manual steps
   # in App Store Connect, done by the owner.
