@@ -26,11 +26,13 @@ export function loadEntries(): Entry[] {
 // Written to a temporary file first, so a crash during the write never leaves a half-written list
 export function saveEntries(entries: Entry[]): void {
   ensureDirs();
-  if (entriesTmp.exists) entriesTmp.delete();
-  entriesTmp.create();
-  entriesTmp.write(serializeEntries(entries));
-  if (entriesFile.exists) entriesFile.delete();
-  entriesTmp.move(entriesFile);
+  // A new File each time: moving a File changes the path it points to
+  const tmp = new File(root, 'entries.json.tmp');
+  if (tmp.exists) tmp.delete();
+  tmp.create();
+  tmp.write(serializeEntries(entries));
+  // moveSync, not move: move() returns a promise, and the list must be on disk before we go on
+  tmp.moveSync(new File(root, 'entries.json'), { overwrite: true });
 }
 
 // The recorder writes into the document directory already; this only moves a file that ended up
@@ -39,7 +41,7 @@ export function keepAudio(uri: string): string {
   ensureDirs();
   const file = new File(uri);
   if (!file.exists || file.uri.startsWith(audioDir.uri)) return file.uri;
-  file.move(audioDir);
+  file.moveSync(audioDir);
   return file.uri;
 }
 

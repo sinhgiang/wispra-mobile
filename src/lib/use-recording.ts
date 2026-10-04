@@ -107,8 +107,8 @@ export function useRecording(kind: EntryKind) {
     let audioUri = recorder.uri ?? get(id)?.audioUri ?? null;
     try {
       if (audioUri) audioUri = keepAudio(audioUri);
-    } catch {
-      // The file stays where the recorder wrote it
+    } catch (err) {
+        // The file stays where the recorder wrote it
     }
     update(id, { status: 'pending', durationMs: Math.max(length, get(id)?.durationMs ?? 0), audioUri });
     await setAudioModeAsync({ allowsRecording: false, allowsBackgroundRecording: false });
