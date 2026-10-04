@@ -173,5 +173,12 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
+        # No beta app review: that is only for external testers (Codemagic CLI: --testflight
+        # "Enable submission of an app for Testflight beta app review to allow external testing")
         submit_to_testflight: false
+        # Once processed, the build is added to the internal tester group "Internal" (created by
+        # the owner in App Store Connect > TestFlight > Internal Testing), so it shows up in the
+        # TestFlight app of its members without any review. The name must match exactly.
+        beta_groups:
+          - Internal
         submit_to_app_store: false
