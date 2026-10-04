@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { confirmDelete } from '@/components/wispra/confirm-delete';
@@ -9,7 +9,7 @@ import { Button, Chip, Label, Title, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { filterEntries, groupByDay, type Entry, type KindFilter } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
-import { deletableEntries, deleteAllWarning } from '@/lib/history-delete';
+import { deletableEntries, deleteAllWarning, deletedAllMessage } from '@/lib/history-delete';
 import { useSession } from '@/lib/use-session';
 
 const FILTERS: { value: KindFilter; label: string }[] = [
@@ -22,7 +22,12 @@ export default function HistoryScreen() {
   const { entries, removeAll } = useEntries();
   const session = useSession();
   const deletable = deletableEntries(entries);
-  const askDeleteAll = () => confirmDelete(deleteAllWarning(deletable, !!session), removeAll);
+  const askDeleteAll = () =>
+    confirmDelete(deleteAllWarning(deletable, !!session), () => {
+      const count = deletable.length;
+      removeAll();
+      Alert.alert('Deleted', deletedAllMessage(count, !!session));
+    });
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState<KindFilter>('all');
 

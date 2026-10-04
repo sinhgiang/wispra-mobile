@@ -78,6 +78,7 @@ export function loadPendingDeletes(): PendingDeletes {
       ids: Array.isArray(raw.ids) ? raw.ids.filter((x): x is string => typeof x === 'string') : [],
       all: raw.all === true,
       since: typeof raw.since === 'string' ? raw.since : null,
+      clearedHandled: typeof raw.clearedHandled === 'string' ? raw.clearedHandled : null,
     };
   } catch {
     return NO_PENDING_DELETES;

@@ -1,7 +1,8 @@
 // Deleting with the history shared through Wispra Cloud (the owner's choice, W-0194): a dictation
 // deleted on one device is deleted on every device signed in to the same account. The phone tells
-// Wispra Cloud what it deleted, and deletes what other devices deleted. Before anything is deleted
-// the user sees exactly what will happen. Pure functions only.
+// Wispra Cloud what it deleted, and deletes what other devices deleted (wispra-web
+// docs/HISTORY_API.md, "Deleting"). Before anything is deleted the user sees exactly what will
+// happen. Pure functions only.
 
 import { cloudId, type Entry } from './entries';
 
@@ -12,11 +13,13 @@ export interface PendingDeletes {
   ids: string[];
   // The user deleted everything
   all: boolean;
-  // The server time of the last list of deletions read from Wispra Cloud
+  // The server time of the last list of deletions read from Wispra Cloud (sent back as `since`)
   since: string | null;
+  // The last "delete everything" (clearedAt, server clock) already applied on this phone
+  clearedHandled: string | null;
 }
 
-export const NO_PENDING_DELETES: PendingDeletes = { ids: [], all: false, since: null };
+export const NO_PENDING_DELETES: PendingDeletes = { ids: [], all: false, since: null, clearedHandled: null };
 
 // The entries "delete all" removes: everything but a recording in progress
 export function deletableEntries(entries: Entry[]): Entry[] {
@@ -67,6 +70,36 @@ export function applyRemoteDeletes(local: Entry[], deletedIds: readonly string[]
   const removed: Entry[] = [];
   for (const e of local) (isInCloud(e) && gone.has(cloudIdOf(e)) ? removed : keep).push(e);
   return { keep, removed };
+}
+
+/**
+ * After another device deleted everything (a `clearedAt` not handled yet): the phone's own
+ * dictations that never reached Wispra Cloud and were made before the clear. The clear time comes
+ * from the server's clock, so it is moved to the phone's clock first, using the `serverTime` of the
+ * same answer: localClear = arrivedAt - (serverTime - clearedAt). Entries that were in the cloud
+ * come in `deleted` by id; meetings are never in the shared history and stay.
+ */
+export function clearedBefore(local: Entry[], clearedAt: string, serverTime: string, arrivedAt: Date): Entry[] {
+  const cleared = Date.parse(clearedAt);
+  const server = Date.parse(serverTime);
+  if (Number.isNaN(cleared) || Number.isNaN(server)) return [];
+  const localClear = arrivedAt.getTime() - (server - cleared);
+  return local.filter(
+    (e) =>
+      e.kind === 'dictation' &&
+      e.source !== 'computer' &&
+      !e.syncedAt &&
+      e.status !== 'recording' &&
+      Date.parse(e.createdAt) < localClear,
+  );
+}
+
+// What the phone says once everything was deleted
+export function deletedAllMessage(count: number, signedIn: boolean): string {
+  const what = `${plural(count, 'recording')} deleted from this phone.`;
+  return signedIn
+    ? `${what} Your history is being deleted on your other devices too; this happens as soon as the phone is online.`
+    : what;
 }
 
 export interface DeleteWarning {

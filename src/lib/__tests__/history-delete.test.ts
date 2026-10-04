@@ -3,9 +3,11 @@ import { describe, expect, it } from '@jest/globals';
 import { createEntry, type Entry } from '../entries';
 import {
   applyRemoteDeletes,
+  clearedBefore,
   clearSent,
   deletableEntries,
   deleteAllWarning,
+  deletedAllMessage,
   deleteOneWarning,
   hasPendingDeletes,
   NO_PENDING_DELETES,
@@ -102,15 +104,15 @@ describe('deletions waiting for Wispra Cloud', () => {
 
   it('replaces single deletions by a delete-all, and keeps one made after it', () => {
     const all = queueDeleteAll(queueDelete(NO_PENDING_DELETES, [shared]));
-    expect(all).toEqual({ ids: [], all: true, since: null });
+    expect(all).toEqual({ ...NO_PENDING_DELETES, ids: [], all: true });
     const later = queueDelete(all, [fromPc]);
-    expect(later).toEqual({ ids: ['pc-1'], all: true, since: null });
+    expect(later).toEqual({ ...NO_PENDING_DELETES, ids: ['pc-1'], all: true });
   });
 
   it('clears only what Wispra Cloud confirmed', () => {
-    const sent = { ids: ['mobile-a'], all: true, since: null };
-    const now = { ids: ['mobile-a', 'pc-1'], all: true, since: '2026-10-05T09:00:00.000Z' };
-    expect(clearSent(now, sent)).toEqual({ ids: ['pc-1'], all: false, since: '2026-10-05T09:00:00.000Z' });
+    const sent = { ...NO_PENDING_DELETES, ids: ['mobile-a'], all: true };
+    const now = { ...NO_PENDING_DELETES, ids: ['mobile-a', 'pc-1'], all: true, since: '2026-10-05T09:00:00.000Z' };
+    expect(clearSent(now, sent)).toEqual({ ...NO_PENDING_DELETES, ids: ['pc-1'], all: false, since: '2026-10-05T09:00:00.000Z' });
   });
 });
 
@@ -135,5 +137,43 @@ describe('deletions made on other devices', () => {
   it('does not bring a deleted computer dictation back with the history', () => {
     const cloud: HistoryEntry[] = [{ id: 'pc-2', text: 'Deleted on the computer', createdAt: '2026-10-05T07:00:00.000Z' }];
     expect(planSync([], cloud, new Set(['pc-2']), true).upserts).toEqual([]);
+  });
+});
+
+describe('another device deleted everything', () => {
+  // The server says it cleared at 12:30 and answered at 12:40 (its clock). The answer reached the
+  // phone at 12:38 phone time, so the phone's clock is 2 minutes behind: the clear was 12:28 here.
+  const clearedAt = '2026-10-05T12:30:00.000Z';
+  const serverTime = '2026-10-05T12:40:00.000Z';
+  const arrivedAt = new Date('2026-10-05T12:38:00.000Z');
+
+  it('deletes unshared phone dictations made before the clear, in the phone clock', () => {
+    const before = dictation({ id: 'mobile-old', createdAt: '2026-10-05T12:27:00.000Z' });
+    const after = dictation({ id: 'mobile-new', createdAt: '2026-10-05T12:29:00.000Z' });
+    expect(clearedBefore([before, after], clearedAt, serverTime, arrivedAt).map((e) => e.id)).toEqual(['mobile-old']);
+  });
+
+  it('leaves meetings, computer entries, shared dictations and a recording in progress', () => {
+    const old = '2026-10-05T10:00:00.000Z';
+    const local = [
+      meeting({ createdAt: old }),
+      dictation({ id: 'pc-9', source: 'computer', createdAt: old }),
+      dictation({ id: 'mobile-s', syncedAt: old, createdAt: old }),
+      dictation({ id: 'mobile-r', status: 'recording', createdAt: old }),
+    ];
+    expect(clearedBefore(local, clearedAt, serverTime, arrivedAt)).toEqual([]);
+  });
+
+  it('does nothing with a time it cannot read', () => {
+    expect(clearedBefore([dictation({})], 'not a date', serverTime, arrivedAt)).toEqual([]);
+  });
+});
+
+describe('after deleting everything', () => {
+  it('says how many were deleted, and that other devices follow when signed in', () => {
+    expect(deletedAllMessage(42, true)).toBe(
+      '42 recordings deleted from this phone. Your history is being deleted on your other devices too; this happens as soon as the phone is online.',
+    );
+    expect(deletedAllMessage(1, false)).toBe('1 recording deleted from this phone.');
   });
 });

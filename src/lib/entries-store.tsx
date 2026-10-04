@@ -18,9 +18,10 @@ import {
 } from './meeting';
 import { canSplitAudio, splitAudio } from '@/modules/wispra-dictation';
 import { askMeeting, makeMindMap, makeOutline, makePost } from './meeting-ai';
-import { CloudUnavailable, deleteHistory, mergeHistory, readHistory } from './cloud-history';
+import { CloudUnavailable, deleteAllHistory, deleteHistoryEntry, mergeHistory, readHistory } from './cloud-history';
 import {
   applyRemoteDeletes,
+  clearedBefore,
   clearSent,
   deletableEntries,
   hasPendingDeletes,
@@ -341,28 +342,47 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       const waiting = pendingDeletes.current;
       if (hasPendingDeletes(waiting)) {
         try {
-          if (waiting.all) await deleteHistory({ all: true });
-          for (const ids of batches(waiting.ids)) await deleteHistory({ ids });
-          setPendingDeletes(clearSent(pendingDeletes.current, waiting));
+          if (waiting.all) {
+            const clearedAt = await deleteAllHistory();
+            // This phone already deleted everything it had: the clear is not applied again
+            setPendingDeletes({
+              ...clearSent(pendingDeletes.current, { ...NO_PENDING_DELETES, all: true }),
+              clearedHandled: clearedAt ?? pendingDeletes.current.clearedHandled,
+            });
+          }
+          // One request per entry; each is cleared as soon as Wispra Cloud confirms it
+          for (const id of waiting.ids) {
+            await deleteHistoryEntry(id);
+            setPendingDeletes(clearSent(pendingDeletes.current, { ...NO_PENDING_DELETES, ids: [id] }));
+          }
         } catch (err) {
           // Until a delete-all reaches Wispra Cloud, nothing is read or shared: the history read now
-          // would bring back what the user deleted, and entries shared now would be deleted with it
-          if (waiting.all) {
-            throw err instanceof CloudUnavailable
-              ? new CloudUnavailable('Wispra Cloud cannot delete yet. The deletion waits on this phone.')
-              : err;
-          }
+          // would bring back what the user deleted
+          if (pendingDeletes.current.all) throw err;
         }
       }
 
-      // 2. What other devices deleted leaves this phone
+      // 2. What other devices deleted leaves this phone: the ids in `deleted`, and after a new
+      // "delete everything" also the phone's dictations that never reached Wispra Cloud
       const page = await readHistory(pendingDeletes.current.since);
-      const { keep, removed } = applyRemoteDeletes(current.current, page.deleted);
+      const arrivedAt = new Date();
+      let { keep, removed } = applyRemoteDeletes(current.current, page.deleted);
+      const newClear = page.clearedAt && page.clearedAt !== pendingDeletes.current.clearedHandled ? page.clearedAt : null;
+      if (newClear && page.serverTime) {
+        const old = new Set(clearedBefore(keep, newClear, page.serverTime, arrivedAt).map((e) => e.id));
+        removed = [...removed, ...keep.filter((e) => old.has(e.id))];
+        keep = keep.filter((e) => !old.has(e.id));
+      }
       if (removed.length > 0) {
         forget(removed);
         commit(keep);
       }
-      if (page.serverTime) setPendingDeletes({ ...pendingDeletes.current, since: page.serverTime });
+      // `since` moves on only after a good answer, so no deletion is missed
+      setPendingDeletes({
+        ...pendingDeletes.current,
+        since: page.serverTime ?? pendingDeletes.current.since,
+        clearedHandled: newClear ?? pendingDeletes.current.clearedHandled,
+      });
 
       // 3. New dictations both ways; deleted ones are never brought back
       const skip = new Set([...hidden.current, ...pendingDeletes.current.ids, ...page.deleted]);

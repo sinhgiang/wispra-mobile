@@ -22,22 +22,34 @@ export interface HistoryPage {
   entries: HistoryEntry[];
   // The page holds the whole history
   complete: boolean;
-  // Ids deleted on any device since `deletedSince` (all of them when it is not given)
+  // Ids deleted on any device since `since` (every deletion when it is not given)
   deleted: string[];
-  // The server's time of this answer: the next `deletedSince`
+  // When the whole history was last deleted (server clock), or null
+  clearedAt: string | null;
+  // The server's time of this answer: the next `since`
   serverTime: string | null;
 }
 
 // The newest entries of the signed-in user's cloud history, and what was deleted since the last read
-export async function readHistory(deletedSince: string | null, limit = 500): Promise<HistoryPage> {
-  const since = deletedSince ? `&deletedSince=${encodeURIComponent(deletedSince)}` : '';
-  const response = await call(`/api/history?limit=${limit}${since}`);
+export async function readHistory(since: string | null, limit = 500): Promise<HistoryPage> {
+  const sinceParam = since ? `&since=${encodeURIComponent(since)}` : '';
+  const response = await call(`/api/history?limit=${limit}${sinceParam}`);
   if (!response.ok) throw new Error(`Reading the shared history failed (HTTP ${response.status}).`);
-  const body = (await response.json()) as { entries?: HistoryEntry[]; nextBefore?: string | null; deleted?: unknown; serverTime?: unknown };
+  const body = (await response.json()) as {
+    entries?: HistoryEntry[];
+    nextBefore?: string | null;
+    deleted?: unknown;
+    clearedAt?: unknown;
+    serverTime?: unknown;
+  };
+  const deleted = Array.isArray(body.deleted) ? body.deleted : [];
   return {
     entries: Array.isArray(body.entries) ? body.entries : [],
     complete: !body.nextBefore,
-    deleted: Array.isArray(body.deleted) ? body.deleted.filter((id): id is string => typeof id === 'string') : [],
+    deleted: deleted
+      .map((d: unknown) => (d && typeof d === 'object' ? (d as { id?: unknown }).id : undefined))
+      .filter((id): id is string => typeof id === 'string'),
+    clearedAt: typeof body.clearedAt === 'string' ? body.clearedAt : null,
     serverTime: typeof body.serverTime === 'string' ? body.serverTime : null,
   };
 }
@@ -48,11 +60,29 @@ export async function mergeHistory(entries: HistoryEntry[]): Promise<void> {
   if (!response.ok) throw new Error(await errorFrom(response, 'Sharing the history failed'));
 }
 
-// Deletes entries of the signed-in user's history on every device: by id, or all of them. Throws
-// CloudUnavailable while Wispra Cloud has no delete route (404); the request then waits on the phone.
-export async function deleteHistory(request: { ids: string[] } | { all: true }): Promise<void> {
-  const response = await call('/api/history/delete', { method: 'POST', body: JSON.stringify(request) });
+// Before Wispra Cloud has the delete routes: /api/history/{id} does not exist (404) and
+// /api/history takes no DELETE (405). The deletion then waits on the phone.
+async function deleteCall(path: string, init: RequestInit): Promise<Response> {
+  const response = await call(path, { ...init, method: 'DELETE' });
+  if (response.status === 405) throw new CloudUnavailable('Wispra Cloud cannot delete yet. Deletions wait on this phone.');
   if (!response.ok) throw new Error(await errorFrom(response, 'Deleting from the shared history failed'));
+  return response;
+}
+
+// Deletes one entry, phone or computer, on every device of the account
+export async function deleteHistoryEntry(id: string): Promise<void> {
+  await deleteCall(`/api/history/${encodeURIComponent(id)}`, {});
+}
+
+// Deletes the whole history on every device of the account; returns the server's clearedAt
+export async function deleteAllHistory(): Promise<string | null> {
+  const response = await deleteCall('/api/history', { body: JSON.stringify({ all: true }) });
+  try {
+    const body = (await response.json()) as { clearedAt?: unknown };
+    return typeof body.clearedAt === 'string' ? body.clearedAt : null;
+  } catch {
+    return null;
+  }
 }
 
 async function errorFrom(response: Response, fallback: string): Promise<string> {
