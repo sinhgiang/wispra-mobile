@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EntryCard } from '@/components/wispra/entry-card';
@@ -90,7 +90,18 @@ function AnyAppCard() {
     return (
       <Card>
         <Text style={styles.cardTitle}>Dictate into any app</Text>
-        <Body style={styles.note}>The Wispra keyboard for iPhone is coming in a later update.</Body>
+        <Body style={styles.note}>
+          Add the Wispra keyboard: Settings &gt; General &gt; Keyboard &gt; Keyboards &gt; Add New Keyboard &gt; Wispra,
+          then tap Wispra and turn on Allow Full Access. In any app, switch to it with the globe key and tap Speak.
+        </Body>
+        <Body style={styles.note}>
+          iPhone keyboards cannot use the microphone, so Speak opens Wispra to listen. Tap Done, go back with ◀ at the top
+          left, and the keyboard types your words. Full access only lets the keyboard pick up those words; it keeps
+          nothing you type.
+        </Body>
+        <View style={styles.cardAction}>
+          <Button small kind="primary" label="Open Settings" onPress={() => void Linking.openSettings()} />
+        </View>
       </Card>
     );
   }

@@ -32,29 +32,27 @@ workflows:
     artifacts:
       - /tmp/xcodebuild_logs/*.log
 
-  # Run once before the first TestFlight build. Creates, in the Apple Developer account, the App
-  # Store provisioning profile for com.sinhgiang.wispramobile, tied to the team's valid
-  # distribution certificates (the one Codemagic generated for Lenvid among them), using the App
-  # Store Connect API key lenvid-asc. "Fetch profiles" in Codemagic only lists profiles that already
-  # exist there; after this run it lists this one. Needs no secret: the integration supplies the API
-  # key, and making a profile needs only the certificates' ids, never their private keys. Does
-  # nothing when the profile is already there. Signs nothing and uploads nothing.
+  # Run once before the first TestFlight build (and again if a profile is missing). In the Apple
+  # Developer account it registers the bundle id of the Wispra keyboard extension if needed, and
+  # creates the App Store provisioning profiles of the app and of the keyboard, tied to the team's
+  # valid distribution certificates (the one Codemagic generated for Lenvid among them), using the
+  # App Store Connect API key lenvid-asc. "Fetch profiles" in Codemagic only lists profiles that
+  # already exist there; after this run it lists these two. Needs no secret: the integration
+  # supplies the API key, and making a profile needs only the certificates' ids, never their private
+  # keys. A profile that is already there is left as it is. Signs nothing and uploads nothing.
   ios-create-profile:
     name: 'iOS: create App Store profile'
     max_build_duration: 15
     instance_type: mac_mini_m2
     integrations:
       app_store_connect: lenvid-asc
-    environment:
-      vars:
-        BUNDLE_ID: com.sinhgiang.wispramobile
-        PROFILE_NAME: Wispra App Store
     scripts:
-      - name: Create the App Store profile if it is missing
+      - name: Create the App Store profiles if they are missing
         script: |
           #!/bin/bash
           set -euo pipefail
-          # Ids from the JSON the Codemagic CLI prints (a list of Apple resources)
+          # Ids from the JSON the Codemagic CLI prints (a list of Apple resources), skipping
+          # anything that has expired
           ids() {
             python3 -c '
           import json, sys, datetime
@@ -66,27 +64,36 @@ workflows:
                   print(item["id"])
           '
           }
-          existing=$(app-store-connect profiles list --type IOS_APP_STORE --name "$PROFILE_NAME" --state ACTIVE --json | ids)
-          if [ -n "$existing" ]; then
-            echo "The profile '$PROFILE_NAME' already exists. Nothing to do."
-            exit 0
-          fi
-          bundle=$(app-store-connect bundle-ids list --bundle-id-identifier "$BUNDLE_ID" --strict-match-identifier --json | ids | head -n 1)
-          if [ -z "$bundle" ]; then
-            echo "The bundle ID $BUNDLE_ID is not registered in the Apple Developer account."
-            exit 1
-          fi
           certs=$( { app-store-connect certificates list --type DISTRIBUTION --json | ids; app-store-connect certificates list --type IOS_DISTRIBUTION --json | ids; } | sort -u)
           if [ -z "$certs" ]; then
             echo "No valid distribution certificate in the Apple Developer account."
             exit 1
           fi
           echo "Distribution certificates found: $(echo "$certs" | wc -l | tr -d ' ')"
-          # shellcheck disable=SC2086
-          app-store-connect profiles create "$bundle" --type IOS_APP_STORE --name "$PROFILE_NAME" --certificate-ids $certs
-          echo "Created the App Store profile '$PROFILE_NAME' for $BUNDLE_ID."
+
+          # bundle id | name of the bundle id (if it has to be registered) | profile name
+          for line in \
+            "com.sinhgiang.wispramobile|Wispra|Wispra App Store" \
+            "com.sinhgiang.wispramobile.keyboard|Wispra Keyboard|Wispra Keyboard App Store"; do
+            IFS='|' read -r bundle_id bundle_name profile_name <<< "$line"
+            existing=$(app-store-connect profiles list --type IOS_APP_STORE --name "$profile_name" --state ACTIVE --json | ids)
+            if [ -n "$existing" ]; then
+              echo "The profile '$profile_name' already exists."
+              continue
+            fi
+            bundle=$(app-store-connect bundle-ids list --bundle-id-identifier "$bundle_id" --strict-match-identifier --json | ids | head -n 1)
+            if [ -z "$bundle" ]; then
+              echo "Registering the bundle id $bundle_id."
+              app-store-connect bundle-ids create "$bundle_id" --name "$bundle_name" --platform IOS
+              bundle=$(app-store-connect bundle-ids list --bundle-id-identifier "$bundle_id" --strict-match-identifier --json | ids | head -n 1)
+            fi
+            # shellcheck disable=SC2086
+            app-store-connect profiles create "$bundle" --type IOS_APP_STORE --name "$profile_name" --certificate-ids $certs
+            echo "Created the App Store profile '$profile_name' for $bundle_id."
+          done
           echo "Next: Codemagic > Team settings > codemagic.yaml settings > Code signing identities >"
-          echo "iOS provisioning profiles > Fetch profiles, select it, Reference name wispra-app-store, Download selected."
+          echo "iOS provisioning profiles > Fetch profiles, select 'Wispra App Store' and 'Wispra Keyboard App Store',"
+          echo "Reference names wispra-app-store and wispra-keyboard-app-store, Download selected."
 
   # Signed build, uploaded to App Store Connect so it appears in TestFlight for internal
   # testers. It is never sent to App Review or to external beta review: those stay manual steps
@@ -104,8 +111,9 @@ workflows:
       xcode: latest
       cocoapods: default
       ios_signing:
-        # Codemagic fetches or creates the Apple Distribution certificate and the App Store
-        # profile for this bundle id (Team settings > Code signing identities).
+        # The certificate and App Store profiles stored in Codemagic (Team settings > Code signing
+        # identities) for this bundle id. Extensions such as the keyboard
+        # (com.sinhgiang.wispramobile.keyboard) are matched too.
         distribution_type: app_store
         bundle_identifier: com.sinhgiang.wispramobile
       vars:
@@ -121,6 +129,31 @@ workflows:
             echo "then put its Apple ID (a number) in the ios-testflight workflow."
             exit 1
           fi
+      - name: Build number and Apple Team ID for the Xcode project
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          # App Store Connect refuses a build number it has already seen: take the newest one on
+          # TestFlight and add one (1 before the first upload). Set before `expo prebuild`
+          # (app.config.js reads it), so the app and the keyboard extension get the same number.
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          case "$LATEST" in ''|*[!0-9]*) LATEST=0 ;; esac
+          BUILD_NUMBER=$((LATEST + 1))
+          echo "Latest build number on TestFlight: $LATEST. This build: $BUILD_NUMBER."
+          echo "IOS_BUILD_NUMBER=$BUILD_NUMBER" >> "$CM_ENV"
+          # The team that owns the installed App Store profiles; the keyboard target needs it
+          TEAM=""
+          for profile in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
+            [ -e "$profile" ] || continue
+            TEAM=$(security cms -D -i "$profile" | plutil -extract TeamIdentifier.0 raw -o - - || true)
+            [ -n "$TEAM" ] && break
+          done
+          if [ -z "$TEAM" ]; then
+            echo "No App Store profile is installed: run 'iOS: create App Store profile', then Fetch profiles in Codemagic."
+            exit 1
+          fi
+          echo "Apple Team ID: $TEAM"
+          echo "APPLE_TEAM_ID=$TEAM" >> "$CM_ENV"
       - name: Install JavaScript dependencies
         script: npm ci
       - name: Run the tests
@@ -131,16 +164,6 @@ workflows:
         script: cd ios && pod install
       - name: Apply signing profiles to the Xcode project
         script: xcode-project use-profiles
-      - name: Set the build number
-        script: |
-          #!/bin/bash
-          # App Store Connect refuses a build number it has already seen: take the newest one on
-          # TestFlight and add one (1 before the first upload).
-          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
-          case "$LATEST" in ''|*[!0-9]*) LATEST=0 ;; esac
-          BUILD_NUMBER=$((LATEST + 1))
-          echo "Latest build number on TestFlight: $LATEST. This build: $BUILD_NUMBER."
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" ios/Wispra/Info.plist
       - name: Build a signed .ipa
         script: |
           xcode-project build-ipa --workspace ios/Wispra.xcworkspace --scheme Wispra

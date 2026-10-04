@@ -45,7 +45,8 @@
           "enableBackgroundRecording": true
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true,
