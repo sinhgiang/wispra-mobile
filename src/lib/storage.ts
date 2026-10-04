@@ -99,6 +99,17 @@ export function saveDataOwner(owner: DataOwner): void {
   tmp.moveSync(new File(root, 'account.json'), { overwrite: true });
 }
 
+// Whether the first-run guide was opened already (it opens by itself only once)
+export function guideSeen(): boolean {
+  return new File(root, 'guide-seen').exists;
+}
+
+export function markGuideSeen(): void {
+  ensureDirs();
+  const file = new File(root, 'guide-seen');
+  if (!file.exists) file.create();
+}
+
 // Dictations made with the mic button over other apps wait here (written by the Android service)
 const inboxDir = new Directory(root, 'inbox');
 

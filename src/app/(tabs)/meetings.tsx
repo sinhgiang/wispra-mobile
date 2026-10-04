@@ -4,6 +4,7 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EntryCard } from '@/components/wispra/entry-card';
+import { SetupReminders } from '@/components/wispra/setup-reminders';
 import { Body, Button, Card, Title, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { sortEntries } from '@/lib/entries';
@@ -17,6 +18,7 @@ export default function MeetingsScreen() {
     <SafeAreaView edges={['top']} style={ui.screen}>
       <View style={styles.header}>
         <Title>Meetings</Title>
+        <SetupReminders screen="meetings" />
         <Button kind="primary" label="Record a meeting" onPress={() => router.push('/meeting/record')} />
       </View>
       <FlatList

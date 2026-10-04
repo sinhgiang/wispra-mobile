@@ -4,6 +4,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-na
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EntryCard } from '@/components/wispra/entry-card';
+import { SetupReminders } from '@/components/wispra/setup-reminders';
 import { Body, Button, Card, Label, MicGlyph, Title, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { formatDuration, sortEntries } from '@/lib/entries';
@@ -30,6 +31,7 @@ export default function DictateScreen() {
     <SafeAreaView edges={['top']} style={ui.screen}>
       <ScrollView contentContainerStyle={styles.content}>
         <Title>Dictate</Title>
+        <SetupReminders screen="dictate" />
 
         <Card style={styles.recorder}>
           {live ? (
@@ -91,8 +93,8 @@ function AnyAppCard() {
       <Card>
         <Text style={styles.cardTitle}>Dictate into any app</Text>
         <Body style={styles.note}>
-          Add the Wispra keyboard: Settings &gt; General &gt; Keyboard &gt; Keyboards &gt; Add New Keyboard &gt; Wispra,
-          then tap Wispra and turn on Allow Full Access. In any app, switch to it with the globe key and tap Speak.
+          Use the Wispra keyboard: turn it on in Settings (Keyboards, with Allow Full Access), then in any app touch and hold the
+          globe key 🌐 and choose Wispra, and tap Speak.
         </Body>
         <Body style={styles.note}>
           iPhone keyboards cannot use the microphone, so Speak opens Wispra to listen. Tap Done, go back with ◀ at the top
@@ -100,7 +102,8 @@ function AnyAppCard() {
           nothing you type.
         </Body>
         <View style={styles.cardAction}>
-          <Button small kind="primary" label="Open Settings" onPress={() => void Linking.openSettings()} />
+          <Button small kind="primary" label="Show me how" onPress={() => router.push('/welcome')} />
+          <Button small label="Open Settings" onPress={() => void Linking.openSettings()} />
         </View>
       </Card>
     );

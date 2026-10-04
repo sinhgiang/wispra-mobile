@@ -10,6 +10,8 @@ import UIKit
 final class KeyboardViewController: UIInputViewController {
   /// Same name as in modules/wispra-keyboard-bridge (the app writes, the keyboard reads)
   static let pasteboardName = UIPasteboard.Name("com.sinhgiang.wispramobile.keyboard")
+  /// The keyboard notes here when it was last on screen, so the app knows it is set up and in use
+  static let seenPasteboardName = UIPasteboard.Name("com.sinhgiang.wispramobile.keyboard.seen")
   /// Words older than this are not typed any more
   static let maxAgeSeconds: TimeInterval = 15 * 60
 
@@ -84,6 +86,7 @@ final class KeyboardViewController: UIInputViewController {
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
     globeButton.isHidden = !needsInputModeSwitchKey
+    markSeen()
     // Coming back from Wispra: the words may already be waiting, or arrive in a moment
     typeWaitingWords()
     startPolling(seconds: 60)
@@ -200,6 +203,15 @@ final class KeyboardViewController: UIInputViewController {
   }
 
   // MARK: Helpers
+
+  /// Only possible with full access (keyboards without it cannot reach any pasteboard)
+  private func markSeen() {
+    guard hasFullAccess, let pasteboard = UIPasteboard(name: Self.seenPasteboardName, create: true) else { return }
+    pasteboard.setItems(
+      [["public.utf8-plain-text": String(Int(Date().timeIntervalSince1970 * 1000))]],
+      options: [:]
+    )
+  }
 
   /// Keyboards have no API to open their app. The usual way: find UIApplication in the responder
   /// chain and ask it to open the URL. `open(_:options:completionHandler:)` is marked unavailable

@@ -6,6 +6,9 @@ import { useEffect } from 'react';
 import { W } from '@/constants/wispra';
 import { loadSession } from '@/lib/cloud-auth';
 import { EntriesProvider, useEntries } from '@/lib/entries-store';
+import { shouldShowGuide } from '@/lib/setup-guide';
+import { guideSeen, markGuideSeen } from '@/lib/storage';
+import { useSetupStateBase } from '@/lib/use-setup';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -22,6 +25,32 @@ function AskAccountChoice() {
     if (waiting) router.push('/account-switch');
   }, [waiting]);
   return null;
+}
+
+// The first-run guide opens by itself once, unless everything is set up already (T-0145). The
+// account question, when there is one, comes first.
+function OpenGuideOnce() {
+  const { loaded, accountChoice } = useEntries();
+  const { state } = useSetupStateBase();
+  const show = loaded && accountChoice === null && shouldShowGuide(guideSeenSafe(), state);
+  useEffect(() => {
+    if (!show) return;
+    try {
+      markGuideSeen();
+    } catch {
+      // Opens again next time; nothing else is affected
+    }
+    router.push('/welcome');
+  }, [show]);
+  return null;
+}
+
+function guideSeenSafe(): boolean {
+  try {
+    return guideSeen();
+  } catch {
+    return true;
+  }
 }
 
 function HideSplashWhenLoaded() {
@@ -43,12 +72,14 @@ export default function RootLayout() {
       <EntriesProvider>
         <HideSplashWhenLoaded />
         <AskAccountChoice />
+        <OpenGuideOnce />
         <StatusBar style="light" />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: W.bg } }}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="meeting/record" options={{ gestureEnabled: false }} />
           <Stack.Screen name="meeting/[id]" />
           <Stack.Screen name="account-switch" options={{ gestureEnabled: false }} />
+          <Stack.Screen name="welcome" />
         </Stack>
       </EntriesProvider>
     </ThemeProvider>

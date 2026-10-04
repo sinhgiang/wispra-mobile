@@ -6,9 +6,26 @@ import UIKit
 /// (targets/keyboard/KeyboardViewController.swift reads the same pasteboard).
 public class WispraKeyboardBridgeModule: Module {
   static let pasteboardName = UIPasteboard.Name("com.sinhgiang.wispramobile.keyboard")
+  static let seenPasteboardName = UIPasteboard.Name("com.sinhgiang.wispramobile.keyboard.seen")
+  static let keyboardBundleId = "com.sinhgiang.wispramobile.keyboard"
 
   public func definition() -> ModuleDefinition {
     Name("WispraKeyboardBridge")
+
+    // Whether the Wispra keyboard is turned on in Settings (from the list of keyboards iOS keeps,
+    // null when it cannot be read), and when it was last on screen (ms since 1970, null: never,
+    // or full access is off)
+    AsyncFunction("keyboardStatus") { () -> [String: Any] in
+      var status: [String: Any] = ["enabled": NSNull(), "lastSeenAt": NSNull()]
+      if let keyboards = UserDefaults.standard.object(forKey: "AppleKeyboards") as? [String] {
+        status["enabled"] = keyboards.contains { $0.hasPrefix(Self.keyboardBundleId) }
+      }
+      if let pasteboard = UIPasteboard(name: Self.seenPasteboardName, create: false),
+         let text = pasteboard.string, let at = Double(text) {
+        status["lastSeenAt"] = at
+      }
+      return status
+    }.runOnQueue(.main)
 
     // { id, text, at }: at is milliseconds since 1970, so the keyboard ignores stale words
     AsyncFunction("handOff") { (id: String, text: String) -> Bool in
