@@ -78,7 +78,10 @@ export async function syncDeletes(store: DeleteSyncStore, cloud: DeleteSyncCloud
   let { keep, removed } = applyRemoteDeletes(store.entries(), page.deleted);
   const handled = store.pending().clearedHandled;
   const newClear = page.clearedAt && page.clearedAt !== handled ? page.clearedAt : null;
-  if (newClear && page.serverTime) {
+  // A clear from before this phone first read this account's history cannot be about entries made
+  // on the phone (for instance ones just merged in from another account): it is only noted
+  const firstRead = store.pending().since === null;
+  if (newClear && page.serverTime && !firstRead) {
     const old = new Set(clearedBefore(keep, newClear, page.serverTime, arrivedAt).map((e) => e.id));
     removed = [...removed, ...keep.filter((e) => old.has(e.id))];
     keep = keep.filter((e) => !old.has(e.id));

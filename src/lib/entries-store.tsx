@@ -2,6 +2,19 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Alert, AppState } from 'react-native';
 
 import { AiError } from './ai';
+import {
+  choiceText,
+  leaveForNewAccount,
+  mergeIntoNewAccount,
+  needsChoice,
+  ownerAfterSignIn,
+  phoneData,
+  syncAllowed,
+  type AccountChoice,
+  type ChoiceText,
+  type DataOwner,
+  type PhoneData,
+} from './account-switch';
 import { currentSession, subscribe as onSignInChange } from './cloud-auth';
 import { File } from 'expo-file-system';
 
@@ -27,11 +40,13 @@ import {
   deleteAudio,
   loadEntries,
   loadHidden,
+  loadDataOwner,
   loadDeletionBook,
   readInbox,
   removeEmptyLeftovers,
   saveEntries,
   saveHidden,
+  saveDataOwner,
   saveDeletionBook,
 } from './storage';
 import { CLOUD_UPLOAD_MAX_BYTES, transcribe, transcribeAudio, transcriptionAvailable } from './transcriber';
@@ -74,12 +89,21 @@ interface EntriesApi {
   makeMindMapFor(id: string): Promise<void>;
   makePostFor(id: string): Promise<void>;
   ask(id: string, question: string): Promise<void>;
+  // Signed in with another account than the one whose data is on this phone: what the user must
+  // choose before anything is synced (null when there is nothing to choose)
+  accountChoice: PendingAccountChoice | null;
+  chooseAccount(choice: AccountChoice): void;
 }
 
 export interface SyncState {
   at: string | null;
   note: string | null;
   waitingDeletes: number;
+}
+
+export interface PendingAccountChoice {
+  data: PhoneData;
+  text: ChoiceText;
 }
 
 const EntriesContext = createContext<EntriesApi | null>(null);
@@ -123,6 +147,9 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   // Each account's deletions not yet confirmed by Wispra Cloud (see history-delete.ts). Read as it is
   // at start; the account signed in is looked up at each use, never when the file is read.
   const deletionBook = useRef<DeletionBook>(EMPTY_BOOK);
+  // The account the data on this phone belongs to (account.json, see account-switch.ts)
+  const dataOwner = useRef<DataOwner | null>(null);
+  const [accountChoice, setAccountChoice] = useState<PendingAccountChoice | null>(null);
   const myDeletes = useCallback((): PendingDeletes => stateOf(deletionBook.current, currentSession()?.userId ?? null), []);
   // When the history was last shared with Wispra Cloud, and why it was not, if it was not
   const [syncState, setSyncState] = useState<SyncState>({ at: null, note: null, waitingDeletes: 0 });
@@ -184,6 +211,11 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       deletionBook.current = loadDeletionBook();
     } catch {
       deletionBook.current = EMPTY_BOOK;
+    }
+    try {
+      dataOwner.current = loadDataOwner();
+    } catch {
+      dataOwner.current = null;
     }
     setSyncState((prev) => ({ ...prev, waitingDeletes: myDeletes().ids.length }));
     current.current = list;
@@ -314,7 +346,11 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   // The store as delete-sync.ts sees it: always the latest state, read again after every await
   const deleteStore = useMemo<DeleteSyncStore>(
     () => ({
-      userId: () => currentSession()?.userId ?? null,
+      // Nobody, as far as deletions go, until the user chose what happens to another account's data
+      userId: () => {
+        const session = currentSession();
+        return session && syncAllowed(dataOwner.current, session) ? session.userId : null;
+      },
       pending: myDeletes,
       setPending: (next) => setPendingDeletes(next),
       entries: () => current.current,
@@ -349,7 +385,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   // Shares the phone's dictations with Wispra on the computer, and brings the computer's in.
   // Quietly does nothing when signed out, offline, or while Wispra Cloud has no shared history yet.
   const syncHistory = useCallback(async () => {
-    if (readFailed.current || !transcriptionAvailable()) return;
+    if (readFailed.current || !transcriptionAvailable() || !syncAllowed(dataOwner.current, currentSession())) return;
     if (syncing.current) {
       // A deletion made during a sync is sent right after it
       syncAgain.current = true;
@@ -501,7 +537,8 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   // Works through everything waiting, one job at a time, when signed in to Wispra Cloud. A new
   // piece added meanwhile is picked up, because each turn looks at the list again.
   const transcribeWaiting = useCallback(async () => {
-    if (running.current || !transcriptionAvailable()) return;
+    // Until the user chose what happens to another account's data, nothing goes to Wispra Cloud
+    if (running.current || !transcriptionAvailable() || !syncAllowed(dataOwner.current, currentSession())) return;
     running.current = true;
     try {
       while (transcriptionAvailable() && (await runNextJob())) {
@@ -605,12 +642,70 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     [updateNotes, userNotes],
   );
 
+  const saveOwner = useCallback((owner: DataOwner | null) => {
+    dataOwner.current = owner;
+    if (!owner) return;
+    try {
+      saveDataOwner(owner);
+    } catch {
+      // Asked again at the next start if it could not be saved
+    }
+  }, []);
+
+  // After a sign-in: the first account, or the same one, needs nothing; another account waits for
+  // the user's choice, and nothing is synced meanwhile
+  const checkAccount = useCallback(() => {
+    if (readFailed.current) return;
+    const session = currentSession();
+    if (needsChoice(dataOwner.current, session) && session && dataOwner.current) {
+      const data = phoneData(current.current);
+      setAccountChoice({ data, text: choiceText(dataOwner.current, session, data) });
+      return;
+    }
+    setAccountChoice(null);
+    const next = ownerAfterSignIn(dataOwner.current, session);
+    if (next && (next.userId !== dataOwner.current?.userId || next.email !== dataOwner.current?.email)) saveOwner(next);
+  }, [saveOwner]);
+
+  const chooseAccount = useCallback(
+    (choice: AccountChoice) => {
+      const session = currentSession();
+      if (!session || !needsChoice(dataOwner.current, session)) {
+        checkAccount();
+        return;
+      }
+      if (choice === 'merge') {
+        // The phone's entries now belong to the new account and are shared with it
+        commit(mergeIntoNewAccount(current.current));
+      } else {
+        // Removed from this phone only: no deletion is sent to the previous account's Wispra Cloud
+        const { keep, removed } = leaveForNewAccount(current.current);
+        for (const e of removed) {
+          for (const uri of [e.audioUri, ...(e.segments ?? []).map((seg) => seg.uri)]) {
+            try {
+              deleteAudio(uri);
+            } catch {
+              // The entry goes even if a file is already gone
+            }
+          }
+        }
+        commit(keep);
+      }
+      saveOwner({ userId: session.userId, email: session.email });
+      setAccountChoice(null);
+      void transcribeWaiting();
+    },
+    [checkAccount, commit, saveOwner, transcribeWaiting],
+  );
+
   useEffect(() => {
     if (!loaded) return;
+    checkAccount();
     void transcribeWaiting();
     const unsubscribe = onSignInChange((session) => {
       // Each account keeps its own deletions: the count shown is the one of the account signed in now
       setSyncState((prev) => ({ ...prev, waitingDeletes: myDeletes().ids.length }));
+      checkAccount();
       if (session) void transcribeWaiting();
     });
     const sub = AppState.addEventListener('change', (state) => {
@@ -620,7 +715,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       unsubscribe();
       sub.remove();
     };
-  }, [loaded, transcribeWaiting, myDeletes]);
+  }, [loaded, transcribeWaiting, myDeletes, checkAccount]);
 
   const api = useMemo(
     () => ({
@@ -643,8 +738,10 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       makeMindMapFor,
       makePostFor,
       ask,
+      accountChoice,
+      chooseAccount,
     }),
-    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, removeAll, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makePostFor, ask],
+    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, removeAll, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makePostFor, ask, accountChoice, chooseAccount],
   );
   return <EntriesContext.Provider value={api}>{children}</EntriesContext.Provider>;
 }

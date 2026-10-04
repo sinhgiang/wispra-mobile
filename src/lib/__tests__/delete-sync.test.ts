@@ -234,6 +234,8 @@ describe('a deletion on another device reaches the phone', () => {
 
   it('after "delete everything" elsewhere, removes shared entries by id and unshared ones made before it, once', async () => {
     server.account('user-a').entries = [{ id: 'mobile-s', text: 'shared', createdAt: at.toISOString() }];
+    // The phone already read this account's history before (since 11:50)
+    store.setPending({ ...emptyPendingDeletes('user-a'), since: '2026-10-05T11:50:00.000Z' });
     server.deleteAll('user-a'); // 12:00 server time, on the computer
     server.tick(10); // the phone reads at 12:10 server time…
     const slowPhone = () => new Date('2026-10-05T12:07:00.000Z'); // …its clock says 12:07: the clear was 11:57 here
@@ -251,6 +253,16 @@ describe('a deletion on another device reaches the phone', () => {
     store.list.push(dictation({ id: 'mobile-later', createdAt: '2026-10-05T11:00:00.000Z' }));
     await syncDeletes(store, realCloud, slowPhone);
     expect(store.list.map((e) => e.id)).toContain('mobile-later');
+  });
+  it('on the first read of an account, only notes an earlier clear: entries on the phone stay', async () => {
+    server.account('user-a').entries = [{ id: 'mobile-s', text: 'x', createdAt: at.toISOString() }];
+    server.deleteAll('user-a');
+    server.tick(10);
+    // For instance dictations just merged in from another account, made before that clear
+    store.list = [dictation({ id: 'mobile-merged', createdAt: '2026-10-05T09:00:00.000Z' })];
+    await syncDeletes(store, realCloud, phoneClock);
+    expect(store.list.map((e) => e.id)).toEqual(['mobile-merged']);
+    expect(store.pending().clearedHandled).toBe('2026-10-05T12:00:00.000Z');
   });
 });
 

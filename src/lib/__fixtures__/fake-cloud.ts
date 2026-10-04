@@ -92,6 +92,13 @@ export class FakeCloud {
       const deleted = a.marks.filter((m) => !since || m.deletedAt >= since);
       return json(200, { entries: a.entries, nextBefore: null, deleted, clearedAt: a.clearedAt, serverTime: this.iso() });
     }
+    if (url.pathname === '/api/history/merge' && method === 'POST') {
+      const entries = (JSON.parse(body ?? '{}') as { entries?: HistoryEntry[] }).entries ?? [];
+      const bad = entries.findIndex((e) => !e.id.startsWith('mobile-'));
+      if (bad >= 0) return json(400, { error: `entries[${bad}]: "id" must start with "mobile-"` });
+      for (const e of entries) a.entries = [...a.entries.filter((x) => x.id !== e.id), e];
+      return json(200, { ok: true, merged: entries.length });
+    }
     if (url.pathname === '/api/history' && method === 'DELETE') {
       if (!this.hasDeleteRoutes) return json(405, {});
       if (body !== JSON.stringify({ all: true })) return json(400, { error: 'The body must be exactly { "all": true }' });

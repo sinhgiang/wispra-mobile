@@ -1,6 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
 import { entryFromInbox, parseEntries, parseInboxRecord, serializeEntries, type Entry } from './entries';
+import { parseOwner, serializeOwner, type DataOwner } from './account-switch';
 import { parseDeletionBook, serializeDeletionBook, type DeletionBook } from './history-delete';
 
 // Everything lives in the app's document directory, which the system never clears on its own
@@ -81,6 +82,21 @@ export function saveDeletionBook(book: DeletionBook): void {
   tmp.create();
   tmp.write(serializeDeletionBook(book));
   tmp.moveSync(new File(root, 'pending-deletes.json'), { overwrite: true });
+}
+
+// The account the data on this phone belongs to (see account-switch.ts)
+export function loadDataOwner(): DataOwner | null {
+  const file = new File(root, 'account.json');
+  return parseOwner(file.exists ? file.textSync() : null);
+}
+
+export function saveDataOwner(owner: DataOwner): void {
+  ensureDirs();
+  const tmp = new File(root, 'account.json.tmp');
+  if (tmp.exists) tmp.delete();
+  tmp.create();
+  tmp.write(serializeOwner(owner));
+  tmp.moveSync(new File(root, 'account.json'), { overwrite: true });
 }
 
 // Dictations made with the mic button over other apps wait here (written by the Android service)

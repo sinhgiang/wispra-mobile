@@ -1,4 +1,4 @@
-import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
+import { DarkTheme, router, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -13,6 +13,16 @@ const theme = {
   ...DarkTheme,
   colors: { ...DarkTheme.colors, background: W.bg, card: W.bg, text: W.text, border: W.line, primary: W.accent },
 };
+
+// Another account signed in: the choice screen comes up, and stays until the user chooses
+function AskAccountChoice() {
+  const { accountChoice } = useEntries();
+  const waiting = accountChoice !== null;
+  useEffect(() => {
+    if (waiting) router.push('/account-switch');
+  }, [waiting]);
+  return null;
+}
 
 function HideSplashWhenLoaded() {
   const { loaded } = useEntries();
@@ -32,11 +42,13 @@ export default function RootLayout() {
     <ThemeProvider value={theme}>
       <EntriesProvider>
         <HideSplashWhenLoaded />
+        <AskAccountChoice />
         <StatusBar style="light" />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: W.bg } }}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="meeting/record" options={{ gestureEnabled: false }} />
           <Stack.Screen name="meeting/[id]" />
+          <Stack.Screen name="account-switch" options={{ gestureEnabled: false }} />
         </Stack>
       </EntriesProvider>
     </ThemeProvider>
