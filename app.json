@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "wispra-mobile",
+    "name": "Wispra",
     "slug": "wispra-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "wispramobile",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.sinhgiang.wispramobile"
@@ -30,9 +30,16 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#0f1117",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Wispra records your voice to turn it into text.",
+          "enableBackgroundRecording": true
         }
       ]
     ],
@@ -46,6 +53,7 @@
         "projectId": "1dd82f99-15b5-4b7d-b05e-5cb109f05b93"
       }
     },
-    "owner": "sinhgiang"
+    "owner": "sinhgiang",
+    "backgroundColor": "#0f1117"
   }
 }
