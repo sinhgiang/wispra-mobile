@@ -53,9 +53,9 @@ workflows:
         distribution_type: app_store
         bundle_identifier: com.sinhgiang.wispramobile
       vars:
-        # The app's numeric Apple ID, shown in App Store Connect under App Information once the
-        # owner has created the app. Empty until then; the build stops with a clear message.
-        APP_STORE_APPLE_ID: ""
+        # The app's numeric Apple ID in App Store Connect (App Information): "Wispra: Voice
+        # Dictation", created by the owner. If it is ever emptied, the build stops with a message.
+        APP_STORE_APPLE_ID: "6819026553"
     scripts:
       - name: Check the App Store Connect app
         script: |
