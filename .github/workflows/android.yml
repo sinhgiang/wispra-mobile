@@ -1,0 +1,80 @@
+# Android test builds on GitHub's machines, so nothing is built on the owner's computer.
+# Free for this public repository. For every push to a helme/mobile-* branch: tests, a release
+# APK, and a pre-release on GitHub Releases with the APK (one per branch, replaced on each push).
+#
+# Signed with the debug key that `expo prebuild` writes from Expo's template (the standard React
+# Native debug key, the same on every machine), so a new APK installs over the previous one.
+# No secret of any kind is used. These are test builds for installing by hand, not store builds.
+
+name: Android test build
+
+on:
+  push:
+    branches:
+      - 'helme/mobile-*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: JavaScript tests
+        run: npm test -- --ci
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate the Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Signing key in use (the standard debug key, no secret)
+        run: md5sum android/app/debug.keystore
+
+      - name: Kotlin tests of the dictation module
+        working-directory: android
+        run: ./gradlew :wispra-dictation:testDebugUnitTest --no-daemon
+
+      - name: Build the release APK
+        working-directory: android
+        # Phones only; emulators are not used for testing
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Publish as a pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="${GITHUB_REF_NAME}"
+          slug="$(echo "$branch" | sed 's#^helme/##; s#[^A-Za-z0-9._-]#-#g')"
+          short="$(git rev-parse --short HEAD)"
+          tag="build-${slug}"
+          apk="wispra-${slug}-${short}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
+          # One pre-release per branch: the previous build of this branch is replaced
+          gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" "$apk" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Wispra test build: ${branch} (${short})" \
+            --notes "Android test build of branch ${branch}, commit ${short}, built by GitHub Actions. For installing by hand on an Android phone; not a store release."
