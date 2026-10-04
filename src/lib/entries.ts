@@ -27,6 +27,10 @@ export interface Entry {
   segments?: MeetingSegment[];
   // Summary, topics, action items, mind map, post and questions asked about a meeting
   notes?: MeetingNotes;
+  // 'computer': a dictation made with Wispra on the computer, read from Wispra Cloud
+  source?: 'phone' | 'computer';
+  // When this phone dictation was last merged into the Wispra Cloud history
+  syncedAt?: string;
 }
 
 export type KindFilter = 'all' | EntryKind;

@@ -45,6 +45,28 @@ export function keepAudio(uri: string): string {
   return file.uri;
 }
 
+// Ids of computer dictations the user removed on the phone, so the shared history does not bring
+// them back. Only the phone forgets them; they stay on the computer and in Wispra Cloud.
+export function loadHidden(): Set<string> {
+  const file = new File(root, 'hidden.json');
+  if (!file.exists) return new Set();
+  try {
+    const ids = JSON.parse(file.textSync()) as unknown;
+    return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function saveHidden(ids: Set<string>): void {
+  ensureDirs();
+  const tmp = new File(root, 'hidden.json.tmp');
+  if (tmp.exists) tmp.delete();
+  tmp.create();
+  tmp.write(JSON.stringify([...ids]));
+  tmp.moveSync(new File(root, 'hidden.json'), { overwrite: true });
+}
+
 // Dictations made with the mic button over other apps wait here (written by the Android service)
 const inboxDir = new Directory(root, 'inbox');
 

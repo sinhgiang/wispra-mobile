@@ -9,10 +9,13 @@ import { useEntries } from '@/lib/entries-store';
 export function EntryCard({ entry, onPress }: { entry: Entry; onPress?: () => void }) {
   if (needsTranscription(entry)) return <PendingCard entry={entry} onPress={onPress} />;
   const meeting = entry.kind === 'meeting';
+  // MTG a meeting, PC a dictation made with Wispra on the computer, DIC one made on this phone
+  const tag = meeting ? 'MTG' : entry.source === 'computer' ? 'PC' : 'DIC';
+  const tagColor = meeting ? W.green : entry.source === 'computer' ? W.amberSoft : W.accentSoft;
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={styles.card}>
       <View style={styles.tag}>
-        <Text style={[styles.tagText, { color: meeting ? W.green : W.accentSoft }]}>{meeting ? 'MTG' : 'DIC'}</Text>
+        <Text style={[styles.tagText, { color: tagColor }]}>{tag}</Text>
       </View>
       <View style={styles.main}>
         <View style={styles.head}>

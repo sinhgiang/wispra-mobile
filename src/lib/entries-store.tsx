@@ -18,7 +18,9 @@ import {
 } from './meeting';
 import { canSplitAudio, splitAudio } from '@/modules/wispra-dictation';
 import { askMeeting, makeMindMap, makeOutline, makePost } from './meeting-ai';
-import { clearInbox, deleteAudio, loadEntries, readInbox, removeEmptyLeftovers, saveEntries } from './storage';
+import { CloudUnavailable, mergeHistory, readHistory } from './cloud-history';
+import { batches, planSync, toHistoryEntry } from './history-sync';
+import { clearInbox, deleteAudio, loadEntries, loadHidden, readInbox, removeEmptyLeftovers, saveEntries, saveHidden } from './storage';
 import { CLOUD_UPLOAD_MAX_BYTES, transcribe, transcribeAudio, transcriptionAvailable } from './transcriber';
 
 interface EntriesApi {
@@ -40,8 +42,11 @@ interface EntriesApi {
   retry(id: string): Promise<void>;
   // Ids of the entries being transcribed or written up right now
   busy: ReadonlySet<string>;
-  // Transcribes what is waiting, if signed in (called after a new recording or piece)
+  // Transcribes what is waiting, if signed in (called after a new recording or piece), then
+  // shares the history with Wispra on the computer
   transcribeWaiting(): Promise<void>;
+  // Last time the history was shared with Wispra Cloud, and why not when it could not be
+  syncState: { at: string | null; note: string | null };
   // AI notes for a meeting: the summary and outline, the mind map, the post, a question
   makeNotes(id: string): Promise<void>;
   makeMindMapFor(id: string): Promise<void>;
@@ -74,6 +79,11 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   const readFailed = useRef(false);
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const running = useRef(false);
+  const syncing = useRef(false);
+  // Computer dictations removed on this phone (see remove)
+  const hidden = useRef<Set<string>>(new Set());
+  // When the history was last shared with Wispra Cloud, and why it was not, if it was not
+  const [syncState, setSyncState] = useState<{ at: string | null; note: string | null }>({ at: null, note: null });
 
   // Returns whether the list reached the disk
   const commit = useCallback((next: Entry[]): boolean => {
@@ -109,6 +119,11 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       readFailed.current = true;
       Alert.alert('Could not read your recordings', `${errorText(err)}. Nothing is changed on this phone until Wispra restarts.`);
+    }
+    try {
+      hidden.current = loadHidden();
+    } catch {
+      hidden.current = new Set();
     }
     current.current = list;
     setEntries(list);
@@ -219,10 +234,47 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
           // The entry goes even if a file is already gone
         }
       }
+      // A computer dictation is only hidden on the phone, so the shared history does not bring it back
+      if (entry?.source === 'computer') {
+        hidden.current.add(id);
+        try {
+          saveHidden(hidden.current);
+        } catch {
+          // It may come back from the shared history; nothing is lost
+        }
+      }
       commit(current.current.filter((e) => e.id !== id));
     },
     [commit],
   );
+
+  // Shares the phone's dictations with Wispra on the computer, and brings the computer's in.
+  // Quietly does nothing when signed out, offline, or while Wispra Cloud has no shared history yet.
+  const syncHistory = useCallback(async () => {
+    if (syncing.current || readFailed.current || !transcriptionAvailable()) return;
+    syncing.current = true;
+    try {
+      const page = await readHistory();
+      const plan = planSync(current.current, page.entries, hidden.current, page.complete);
+      if (plan.upserts.length > 0) {
+        const incoming = new Map(plan.upserts.map((e) => [e.id, e]));
+        const kept = current.current.map((e) => incoming.get(e.id) ?? e);
+        const known = new Set(kept.map((e) => e.id));
+        commit([...kept, ...plan.upserts.filter((e) => !known.has(e.id))]);
+      }
+      for (const batch of batches(plan.push)) {
+        await mergeHistory(batch.map(toHistoryEntry));
+        const ids = new Set(batch.map((e) => e.id));
+        const at = new Date().toISOString();
+        commit(current.current.map((e) => (ids.has(e.id) ? { ...e, syncedAt: at } : e)));
+      }
+      setSyncState({ at: new Date().toISOString(), note: null });
+    } catch (err) {
+      setSyncState((prev) => ({ at: prev.at, note: err instanceof CloudUnavailable ? err.message : errorText(err) }));
+    } finally {
+      syncing.current = false;
+    }
+  }, [commit]);
 
   const mark = useCallback((id: string, on: boolean) => {
     setBusy((prev) => {
@@ -341,7 +393,9 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     } finally {
       running.current = false;
     }
-  }, [runNextJob]);
+    // New text is shared with the computer, and the computer's new dictations come in
+    await syncHistory();
+  }, [runNextJob, syncHistory]);
 
   const retry = useCallback(
     async (id: string) => {
@@ -464,12 +518,13 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       retry,
       busy,
       transcribeWaiting,
+      syncState,
       makeNotes: makeNotesByUser,
       makeMindMapFor,
       makePostFor,
       ask,
     }),
-    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, retry, busy, transcribeWaiting, makeNotesByUser, makeMindMapFor, makePostFor, ask],
+    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makePostFor, ask],
   );
   return <EntriesContext.Provider value={api}>{children}</EntriesContext.Provider>;
 }
