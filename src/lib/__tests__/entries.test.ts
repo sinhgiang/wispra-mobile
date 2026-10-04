@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  cloudId,
   createEntry,
   dayLabel,
   defaultMeetingTitle,
@@ -9,6 +10,7 @@ import {
   formatDuration,
   groupByDay,
   matchesQuery,
+  newId,
   parseEntries,
   parseInboxRecord,
   previewText,
@@ -67,6 +69,19 @@ describe('days', () => {
       ['Today', ['a', 'b']],
       ['Yesterday', ['c']],
     ]);
+  });
+});
+
+describe('ids', () => {
+  it('makes mobile-<uuid v4> ids that cannot collide with the computer', () => {
+    expect(newId(Array.from({ length: 16 }, (_, i) => i * 17))).toBe('mobile-00112233-4455-4677-8899-aabbccddeeff');
+    expect(newId()).toMatch(/^mobile-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(newId()).not.toBe(newId());
+  });
+
+  it('adds the prefix to ids from earlier test builds only', () => {
+    expect(cloudId('lx2k1-abc123')).toBe('mobile-lx2k1-abc123');
+    expect(cloudId('mobile-1')).toBe('mobile-1');
   });
 });
 

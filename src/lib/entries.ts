@@ -25,11 +25,33 @@ export interface Entry {
 
 export type KindFilter = 'all' | EntryKind;
 
-export function newId(now: Date = new Date(), random: () => number = Math.random): string {
-  return `${now.getTime().toString(36)}-${Math.floor(random() * 36 ** 6).toString(36).padStart(6, '0')}`;
+// Ids of entries made on the phone start with "mobile-", so they never collide with the
+// computer's in the shared Wispra Cloud history (wispra-web docs/HISTORY_API.md).
+export const MOBILE_ID_PREFIX = 'mobile-';
+
+function randomBytes(count: number): number[] {
+  const bytes = new Uint8Array(count);
+  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto;
+  if (c?.getRandomValues) c.getRandomValues(bytes);
+  else for (let i = 0; i < count; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes);
 }
 
-export function createEntry(kind: EntryKind, now: Date = new Date(), id: string = newId(now)): Entry {
+// mobile-<UUID v4>
+export function newId(bytes: number[] = randomBytes(16)): string {
+  const b = [...bytes];
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const hex = b.map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${MOBILE_ID_PREFIX}${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+// Entries saved by earlier test builds have ids without the prefix; they get it when shared
+export function cloudId(id: string): string {
+  return id.startsWith(MOBILE_ID_PREFIX) ? id : `${MOBILE_ID_PREFIX}${id}`;
+}
+
+export function createEntry(kind: EntryKind, now: Date = new Date(), id: string = newId()): Entry {
   return {
     id,
     kind,

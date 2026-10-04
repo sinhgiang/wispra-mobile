@@ -119,7 +119,8 @@ class WispraAccessibilityService : AccessibilityService() {
       }
       return
     }
-    val id = UUID.randomUUID().toString()
+    // "mobile-" so it never collides with the computer's ids in the shared Wispra Cloud history
+    val id = "mobile-" + UUID.randomUUID().toString()
     val audio = File(DictationPrefs.inbox(this), "$id.m4a")
     val sourceApp = target?.packageName?.toString()?.let(::appLabel)
     goForeground()
