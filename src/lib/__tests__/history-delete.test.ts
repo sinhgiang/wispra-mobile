@@ -4,16 +4,17 @@ import { createEntry, type Entry } from '../entries';
 import {
   applyRemoteDeletes,
   clearedBefore,
-  clearSent,
   deletableEntries,
   deleteAllWarning,
   deletedAllMessage,
   deleteOneWarning,
-  hasPendingDeletes,
+  dropIds,
+  emptyPendingDeletes,
   NO_PENDING_DELETES,
-  pendingDeleteCount,
+  parsePendingDeletes,
+  pendingFor,
   queueDelete,
-  queueDeleteAll,
+  serializePendingDeletes,
 } from '../history-delete';
 import { planSync, type HistoryEntry } from '../history-sync';
 
@@ -70,6 +71,7 @@ describe('the warning before deleting everything', () => {
     expect(w.message).toContain('All 3 recordings on this phone (2 dictations and 1 meeting)');
     expect(w.message).toContain('every device signed in to your Wispra account');
     expect(w.message).toContain('even entries this phone does not show');
+    expect(w.message).toContain('needs an internet connection');
     expect(w.confirm).toBe('Delete all 3 everywhere');
   });
 
@@ -87,32 +89,47 @@ describe('the warning before deleting everything', () => {
   it('leaves a recording in progress alone', () => {
     expect(deletableEntries([shared, dictation({ id: 'mobile-r', status: 'recording' })])).toEqual([shared]);
   });
+
+  it('says afterwards how many were deleted, and where', () => {
+    expect(deletedAllMessage(42, true)).toBe(
+      '42 recordings deleted from this phone. Your dictation history was also deleted from Wispra Cloud, for every device of your account.',
+    );
+    expect(deletedAllMessage(1, false)).toBe('1 recording deleted from this phone.');
+  });
 });
 
-describe('deletions waiting for Wispra Cloud', () => {
-  it('queues the cloud id of dictations, never of meetings', () => {
-    const p = queueDelete(NO_PENDING_DELETES, [dictation({ id: 'old-id' }), fromPc, meeting({})]);
+describe('the deletion queue', () => {
+  const mine = emptyPendingDeletes('user-a');
+
+  it('queues only what is in Wispra Cloud: computer dictations and shared phone dictations', () => {
+    const p = queueDelete(mine, [dictation({ id: 'old-id', syncedAt: at.toISOString() }), fromPc, meeting({}), dictation({ id: 'mobile-new' })]);
     expect(p.ids).toEqual(['mobile-old-id', 'pc-1']);
-    expect(pendingDeleteCount(p)).toBe(2);
-    expect(hasPendingDeletes(NO_PENDING_DELETES)).toBe(false);
   });
 
-  it('does not queue the same id twice', () => {
-    const p = queueDelete(queueDelete(NO_PENDING_DELETES, [shared]), [shared]);
-    expect(p.ids).toEqual(['mobile-a']);
+  it('does not queue the same id twice, and drops ids', () => {
+    const p = queueDelete(queueDelete(mine, [shared]), [shared, fromPc]);
+    expect(p.ids).toEqual(['mobile-a', 'pc-1']);
+    expect(dropIds(p, ['mobile-a']).ids).toEqual(['pc-1']);
   });
 
-  it('replaces single deletions by a delete-all, and keeps one made after it', () => {
-    const all = queueDeleteAll(queueDelete(NO_PENDING_DELETES, [shared]));
-    expect(all).toEqual({ ...NO_PENDING_DELETES, ids: [], all: true });
-    const later = queueDelete(all, [fromPc]);
-    expect(later).toEqual({ ...NO_PENDING_DELETES, ids: ['pc-1'], all: true });
+  it('belongs to one account: another account, or none, starts empty', () => {
+    const a = { ...queueDelete(mine, [shared]), since: '2026-10-05T09:00:00.000Z', clearedHandled: '2026-10-05T08:30:00.000Z' };
+    expect(pendingFor(a, 'user-a')).toBe(a);
+    expect(pendingFor(a, 'user-b')).toEqual(emptyPendingDeletes('user-b'));
+    expect(pendingFor(a, null)).toEqual(NO_PENDING_DELETES);
   });
 
-  it('clears only what Wispra Cloud confirmed', () => {
-    const sent = { ...NO_PENDING_DELETES, ids: ['mobile-a'], all: true };
-    const now = { ...NO_PENDING_DELETES, ids: ['mobile-a', 'pc-1'], all: true, since: '2026-10-05T09:00:00.000Z' };
-    expect(clearSent(now, sent)).toEqual({ ...NO_PENDING_DELETES, ids: ['pc-1'], all: false, since: '2026-10-05T09:00:00.000Z' });
+  it('is saved and read back with its account (pending-deletes.json)', () => {
+    const a = { userId: 'user-a', ids: ['pc-1'], since: '2026-10-05T09:00:00.000Z', clearedHandled: '2026-10-05T08:30:00.000Z' };
+    expect(parsePendingDeletes(serializePendingDeletes(a))).toEqual(a);
+  });
+
+  it('drops a file without an account, an old format or a broken file', () => {
+    const old = parsePendingDeletes(JSON.stringify({ ids: ['pc-1'], all: true, since: null }));
+    expect(old.userId).toBeNull();
+    expect(pendingFor(old, 'user-a')).toEqual(emptyPendingDeletes('user-a'));
+    expect(parsePendingDeletes('{nope')).toEqual(NO_PENDING_DELETES);
+    expect(parsePendingDeletes(null)).toEqual(NO_PENDING_DELETES);
   });
 });
 
@@ -166,14 +183,5 @@ describe('another device deleted everything', () => {
 
   it('does nothing with a time it cannot read', () => {
     expect(clearedBefore([dictation({})], 'not a date', serverTime, arrivedAt)).toEqual([]);
-  });
-});
-
-describe('after deleting everything', () => {
-  it('says how many were deleted, and that other devices follow when signed in', () => {
-    expect(deletedAllMessage(42, true)).toBe(
-      '42 recordings deleted from this phone. Your history is being deleted on your other devices too; this happens as soon as the phone is online.',
-    );
-    expect(deletedAllMessage(1, false)).toBe('1 recording deleted from this phone.');
   });
 });

@@ -1,4 +1,4 @@
-import { validToken } from './cloud-auth';
+import { currentSession, validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
 import type { HistoryEntry } from './history-sync';
 
@@ -6,14 +6,28 @@ import type { HistoryEntry } from './history-sync';
 
 export class CloudUnavailable extends Error {}
 
-async function call(path: string, init?: RequestInit): Promise<Response> {
+// The signed-in account is no longer the one a request was made for: nothing is sent
+export class AccountChanged extends Error {
+  constructor() {
+    super('The Wispra account changed. Nothing was sent for the previous account.');
+  }
+}
+
+// `asUser`: the request belongs to that account. If another account is signed in by the time the
+// token is read, the request is not sent, so one account's deletion never goes out with another's
+// sign-in.
+async function call(path: string, init?: RequestInit, asUser?: string): Promise<Response> {
   const token = await validToken();
   if (!token) throw new CloudUnavailable('Not signed in to Wispra Cloud');
-  const response = await fetch(`${cloud.apiBase}${path}`, {
+  if (asUser !== undefined && currentSession()?.userId !== asUser) throw new AccountChanged();
+  return fetch(`${cloud.apiBase}${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   });
-  // A Wispra Cloud without these routes yet answers 404: nothing to do until it has them
+}
+
+// A Wispra Cloud without these routes yet answers 404: nothing to do until it has them
+function unlessMissing(response: Response): Response {
   if (response.status === 404) throw new CloudUnavailable('Wispra Cloud has no shared history yet');
   return response;
 }
@@ -31,9 +45,9 @@ export interface HistoryPage {
 }
 
 // The newest entries of the signed-in user's cloud history, and what was deleted since the last read
-export async function readHistory(since: string | null, limit = 500): Promise<HistoryPage> {
+export async function readHistory(since: string | null, asUser?: string, limit = 500): Promise<HistoryPage> {
   const sinceParam = since ? `&since=${encodeURIComponent(since)}` : '';
-  const response = await call(`/api/history?limit=${limit}${sinceParam}`);
+  const response = unlessMissing(await call(`/api/history?limit=${limit}${sinceParam}`, undefined, asUser));
   if (!response.ok) throw new Error(`Reading the shared history failed (HTTP ${response.status}).`);
   const body = (await response.json()) as {
     entries?: HistoryEntry[];
@@ -55,28 +69,40 @@ export async function readHistory(since: string | null, limit = 500): Promise<Hi
 }
 
 // Adds or updates entries by id; never deletes anything in the cloud
-export async function mergeHistory(entries: HistoryEntry[]): Promise<void> {
-  const response = await call('/api/history/merge', { method: 'POST', body: JSON.stringify({ entries }) });
+export async function mergeHistory(entries: HistoryEntry[], asUser?: string): Promise<void> {
+  const response = unlessMissing(await call('/api/history/merge', { method: 'POST', body: JSON.stringify({ entries }) }, asUser));
   if (!response.ok) throw new Error(await errorFrom(response, 'Sharing the history failed'));
 }
 
-// Before Wispra Cloud has the delete routes: /api/history/{id} does not exist (404) and
-// /api/history takes no DELETE (405). The deletion then waits on the phone.
-async function deleteCall(path: string, init: RequestInit): Promise<Response> {
-  const response = await call(path, { ...init, method: 'DELETE' });
-  if (response.status === 405) throw new CloudUnavailable('Wispra Cloud cannot delete yet. Deletions wait on this phone.');
-  if (!response.ok) throw new Error(await errorFrom(response, 'Deleting from the shared history failed'));
-  return response;
+const NO_DELETE_ROUTES = 'Wispra Cloud cannot delete yet. Deletions wait on this phone.';
+
+// What became of one deletion:
+// - deleted: Wispra Cloud has it (also when the entry was not there: the mark is recorded anyway)
+// - skip: Wispra Cloud refuses this id for good (400, or a 404 about the id): it leaves the queue
+// - retry: a server error; the id stays for the next sync, and the next ids are still sent
+export type DeleteOutcome = 'deleted' | 'skip' | 'retry';
+
+function isJson(response: Response): boolean {
+  return (response.headers.get('content-type') ?? '').includes('application/json');
 }
 
-// Deletes one entry, phone or computer, on every device of the account
-export async function deleteHistoryEntry(id: string): Promise<void> {
-  await deleteCall(`/api/history/${encodeURIComponent(id)}`, {});
+// Deletes one entry, phone or computer, on every device of the account. Throws CloudUnavailable
+// while the delete routes are not live: a missing route answers Next.js's 404 page (HTML), unlike
+// an answer of the route about one id (JSON).
+export async function deleteHistoryEntry(id: string, asUser: string): Promise<DeleteOutcome> {
+  const response = await call(`/api/history/${encodeURIComponent(id)}`, { method: 'DELETE' }, asUser);
+  if (response.ok) return 'deleted';
+  if (response.status === 405 || (response.status === 404 && !isJson(response))) throw new CloudUnavailable(NO_DELETE_ROUTES);
+  if (response.status === 400 || response.status === 404) return 'skip';
+  if (response.status >= 500) return 'retry';
+  throw new Error(await errorFrom(response, 'Deleting from the shared history failed'));
 }
 
 // Deletes the whole history on every device of the account; returns the server's clearedAt
-export async function deleteAllHistory(): Promise<string | null> {
-  const response = await deleteCall('/api/history', { body: JSON.stringify({ all: true }) });
+export async function deleteAllHistory(asUser: string): Promise<string | null> {
+  const response = await call('/api/history', { method: 'DELETE', body: JSON.stringify({ all: true }) }, asUser);
+  if (response.status === 405 || response.status === 404) throw new CloudUnavailable(NO_DELETE_ROUTES);
+  if (!response.ok) throw new Error(await errorFrom(response, 'Deleting the shared history failed'));
   try {
     const body = (await response.json()) as { clearedAt?: unknown };
     return typeof body.clearedAt === 'string' ? body.clearedAt : null;
@@ -105,7 +131,7 @@ export interface Usage {
 }
 
 export async function readUsage(): Promise<Usage> {
-  const response = await call('/api/usage');
+  const response = unlessMissing(await call('/api/usage'));
   if (!response.ok) throw new Error(`Reading the usage failed (HTTP ${response.status}).`);
   const b = (await response.json()) as Partial<Usage>;
   return {

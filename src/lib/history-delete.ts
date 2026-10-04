@@ -2,33 +2,67 @@
 // deleted on one device is deleted on every device signed in to the same account. The phone tells
 // Wispra Cloud what it deleted, and deletes what other devices deleted (wispra-web
 // docs/HISTORY_API.md, "Deleting"). Before anything is deleted the user sees exactly what will
-// happen. Pure functions only.
+// happen. Pure functions only; the order of the steps is in delete-sync.ts.
 
 import { cloudId, type Entry } from './entries';
 
-// What the phone still has to tell Wispra Cloud, kept on the phone so a deletion made offline
-// (or before Wispra Cloud has the delete route) is sent later and never lost
+/**
+ * The phone's deletion state for ONE Wispra account, kept in pending-deletes.json. It is never used
+ * for another account: a deletion made while signed in as A is never sent with B's sign-in, and
+ * B's deletions are read from the start. Signing out drops it.
+ */
 export interface PendingDeletes {
-  // Cloud ids to delete
+  // The account this belongs to
+  userId: string | null;
+  // Cloud ids deleted on this phone that Wispra Cloud has not confirmed yet (one at a time; a
+  // delete-all is never queued: it needs a connection)
   ids: string[];
-  // The user deleted everything
-  all: boolean;
-  // The server time of the last list of deletions read from Wispra Cloud (sent back as `since`)
+  // The server time of the last answer read from Wispra Cloud (sent back as `since`)
   since: string | null;
   // The last "delete everything" (clearedAt, server clock) already applied on this phone
   clearedHandled: string | null;
 }
 
-export const NO_PENDING_DELETES: PendingDeletes = { ids: [], all: false, since: null, clearedHandled: null };
+export function emptyPendingDeletes(userId: string | null): PendingDeletes {
+  return { userId, ids: [], since: null, clearedHandled: null };
+}
 
-// The entries "delete all" removes: everything but a recording in progress
+export const NO_PENDING_DELETES: PendingDeletes = emptyPendingDeletes(null);
+
+// The state of `userId`: what belongs to another account (or to nobody) is dropped
+export function pendingFor(pending: PendingDeletes, userId: string | null): PendingDeletes {
+  return pending.userId === userId && userId !== null ? pending : emptyPendingDeletes(userId);
+}
+
+export function parsePendingDeletes(text: string | null): PendingDeletes {
+  if (!text) return NO_PENDING_DELETES;
+  try {
+    const raw = JSON.parse(text) as Partial<PendingDeletes>;
+    return {
+      // A file written before deletions were tied to an account has no owner, so it is dropped
+      userId: typeof raw.userId === 'string' ? raw.userId : null,
+      ids: Array.isArray(raw.ids) ? raw.ids.filter((x): x is string => typeof x === 'string') : [],
+      since: typeof raw.since === 'string' ? raw.since : null,
+      clearedHandled: typeof raw.clearedHandled === 'string' ? raw.clearedHandled : null,
+    };
+  } catch {
+    return NO_PENDING_DELETES;
+  }
+}
+
+export function serializePendingDeletes(pending: PendingDeletes): string {
+  return JSON.stringify({ userId: pending.userId, ids: pending.ids, since: pending.since, clearedHandled: pending.clearedHandled });
+}
+
+// The entries "delete all" can remove: everything but a recording in progress
 export function deletableEntries(entries: Entry[]): Entry[] {
   return entries.filter((e) => e.status !== 'recording');
 }
 
-// Whether an entry can be in Wispra Cloud: dictations only. Meetings stay on the phone.
+// Whether an entry is in Wispra Cloud: a computer dictation, or a phone dictation already shared.
+// Meetings stay on the phone, and a dictation never shared has nothing to delete there.
 export function isInCloud(entry: Entry): boolean {
-  return entry.kind === 'dictation';
+  return entry.kind === 'dictation' && (entry.source === 'computer' || !!entry.syncedAt);
 }
 
 // The id Wispra Cloud knows the entry by
@@ -36,39 +70,25 @@ export function cloudIdOf(entry: Entry): string {
   return entry.source === 'computer' ? entry.id : cloudId(entry.id);
 }
 
-// Ids are kept even while a delete-all waits: one made during the delete-all request is not lost
 export function queueDelete(pending: PendingDeletes, entries: Entry[]): PendingDeletes {
   const ids = new Set(pending.ids);
   for (const e of entries) if (isInCloud(e)) ids.add(cloudIdOf(e));
   return { ...pending, ids: [...ids] };
 }
 
-// Deleting everything replaces any single deletions still waiting
-export function queueDeleteAll(pending: PendingDeletes): PendingDeletes {
-  return { ...pending, ids: [], all: true };
+// Ids Wispra Cloud confirmed, or that it can never take, leave the queue
+export function dropIds(pending: PendingDeletes, ids: readonly string[]): PendingDeletes {
+  const done = new Set(ids);
+  return { ...pending, ids: pending.ids.filter((id) => !done.has(id)) };
 }
 
-export function hasPendingDeletes(pending: PendingDeletes): boolean {
-  return pending.all || pending.ids.length > 0;
-}
-
-export function pendingDeleteCount(pending: PendingDeletes): number {
-  return (pending.all ? 1 : 0) + pending.ids.length;
-}
-
-// After Wispra Cloud confirmed the deletions that were sent
-export function clearSent(pending: PendingDeletes, sent: PendingDeletes): PendingDeletes {
-  const done = new Set(sent.ids);
-  return { ...pending, all: pending.all && !sent.all, ids: pending.ids.filter((id) => !done.has(id)) };
-}
-
-// The entries other devices deleted, matched by their cloud id
+// The entries other devices deleted, matched by their cloud id. Meetings are never in the cloud.
 export function applyRemoteDeletes(local: Entry[], deletedIds: readonly string[]): { keep: Entry[]; removed: Entry[] } {
   if (deletedIds.length === 0) return { keep: local, removed: [] };
   const gone = new Set(deletedIds);
   const keep: Entry[] = [];
   const removed: Entry[] = [];
-  for (const e of local) (isInCloud(e) && gone.has(cloudIdOf(e)) ? removed : keep).push(e);
+  for (const e of local) (e.kind === 'dictation' && gone.has(cloudIdOf(e)) ? removed : keep).push(e);
   return { keep, removed };
 }
 
@@ -94,23 +114,25 @@ export function clearedBefore(local: Entry[], clearedAt: string, serverTime: str
   );
 }
 
-// What the phone says once everything was deleted
-export function deletedAllMessage(count: number, signedIn: boolean): string {
-  const what = `${plural(count, 'recording')} deleted from this phone.`;
-  return signedIn
-    ? `${what} Your history is being deleted on your other devices too; this happens as soon as the phone is online.`
-    : what;
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
+
+// What the phone says once everything shown was deleted
+export function deletedAllMessage(count: number, everywhere: boolean): string {
+  const what = `${plural(count, 'recording')} deleted from this phone.`;
+  return everywhere ? `${what} Your dictation history was also deleted from Wispra Cloud, for every device of your account.` : what;
+}
+
+// Deleting everything on every device is done at once, never queued (the owner's decision)
+export const DELETE_ALL_NEEDS_CONNECTION =
+  'Deleting everything on every device needs an internet connection. Nothing was deleted. Try again when you are online.';
 
 export interface DeleteWarning {
   title: string;
   message: string;
   // Says exactly what the button does
   confirm: string;
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
 // The warning shown before one entry is deleted
@@ -159,7 +181,7 @@ export function deleteAllWarning(entries: Entry[], signedIn: boolean): DeleteWar
       title: `Delete all ${plural(total, 'recording')} everywhere?`,
       message:
         `All ${plural(total, 'recording')} on this phone (${parts}) will be deleted. ` +
-        'Your whole dictation history in Wispra Cloud will be deleted too, on every device signed in to your Wispra account, your computer included, even entries this phone does not show. This cannot be undone.',
+        'Your whole dictation history in Wispra Cloud will be deleted too, on every device signed in to your Wispra account, your computer included, even entries this phone does not show. This needs an internet connection and cannot be undone.',
       confirm: `Delete all ${total} everywhere`,
     };
   }

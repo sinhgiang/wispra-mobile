@@ -1,7 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
 import { entryFromInbox, parseEntries, parseInboxRecord, serializeEntries, type Entry } from './entries';
-import { NO_PENDING_DELETES, type PendingDeletes } from './history-delete';
+import { parsePendingDeletes, serializePendingDeletes, type PendingDeletes } from './history-delete';
 
 // Everything lives in the app's document directory, which the system never clears on its own
 // (unlike the cache directory).
@@ -71,18 +71,7 @@ export function saveHidden(ids: Set<string>): void {
 // Deletions Wispra Cloud has not confirmed yet, and the time of the last list of deletions read
 export function loadPendingDeletes(): PendingDeletes {
   const file = new File(root, 'pending-deletes.json');
-  if (!file.exists) return NO_PENDING_DELETES;
-  try {
-    const raw = JSON.parse(file.textSync()) as Partial<PendingDeletes>;
-    return {
-      ids: Array.isArray(raw.ids) ? raw.ids.filter((x): x is string => typeof x === 'string') : [],
-      all: raw.all === true,
-      since: typeof raw.since === 'string' ? raw.since : null,
-      clearedHandled: typeof raw.clearedHandled === 'string' ? raw.clearedHandled : null,
-    };
-  } catch {
-    return NO_PENDING_DELETES;
-  }
+  return parsePendingDeletes(file.exists ? file.textSync() : null);
 }
 
 export function savePendingDeletes(pending: PendingDeletes): void {
@@ -90,7 +79,7 @@ export function savePendingDeletes(pending: PendingDeletes): void {
   const tmp = new File(root, 'pending-deletes.json.tmp');
   if (tmp.exists) tmp.delete();
   tmp.create();
-  tmp.write(JSON.stringify(pending));
+  tmp.write(serializePendingDeletes(pending));
   tmp.moveSync(new File(root, 'pending-deletes.json'), { overwrite: true });
 }
 

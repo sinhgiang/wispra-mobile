@@ -9,7 +9,8 @@ import { Button, Chip, Label, Title, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { filterEntries, groupByDay, type Entry, type KindFilter } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
-import { deletableEntries, deleteAllWarning, deletedAllMessage } from '@/lib/history-delete';
+import { CloudUnavailable } from '@/lib/cloud-history';
+import { DELETE_ALL_NEEDS_CONNECTION, deletableEntries, deleteAllWarning, deletedAllMessage } from '@/lib/history-delete';
 import { useSession } from '@/lib/use-session';
 
 const FILTERS: { value: KindFilter; label: string }[] = [
@@ -22,12 +23,23 @@ export default function HistoryScreen() {
   const { entries, removeAll } = useEntries();
   const session = useSession();
   const deletable = deletableEntries(entries);
-  const askDeleteAll = () =>
-    confirmDelete(deleteAllWarning(deletable, !!session), () => {
-      const count = deletable.length;
-      removeAll();
-      Alert.alert('Deleted', deletedAllMessage(count, !!session));
+  // Deletes exactly what the warning counted, for the account the warning spoke of
+  const askDeleteAll = () => {
+    const shown = deletable.map((e) => e.id);
+    const asUser = session?.userId ?? null;
+    confirmDelete(deleteAllWarning(deletable, asUser !== null), () => {
+      removeAll(shown, asUser).then(
+        (count) => Alert.alert('Deleted', deletedAllMessage(count, asUser !== null)),
+        (err: unknown) =>
+          Alert.alert(
+            'Nothing was deleted',
+            err instanceof CloudUnavailable || err instanceof TypeError
+              ? DELETE_ALL_NEEDS_CONNECTION
+              : `${err instanceof Error ? err.message : String(err)} Nothing was deleted.`,
+          ),
+      );
     });
+  };
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState<KindFilter>('all');
 

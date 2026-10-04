@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Alert, AppState } from 'react-native';
 
 import { AiError } from './ai';
-import { subscribe as onSignInChange } from './cloud-auth';
+import { currentSession, subscribe as onSignInChange } from './cloud-auth';
 import { File } from 'expo-file-system';
 
 import { defaultMeetingTitle, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
@@ -19,18 +19,8 @@ import {
 import { canSplitAudio, splitAudio } from '@/modules/wispra-dictation';
 import { askMeeting, makeMindMap, makeOutline, makePost } from './meeting-ai';
 import { CloudUnavailable, deleteAllHistory, deleteHistoryEntry, mergeHistory, readHistory } from './cloud-history';
-import {
-  applyRemoteDeletes,
-  clearedBefore,
-  clearSent,
-  deletableEntries,
-  hasPendingDeletes,
-  NO_PENDING_DELETES,
-  pendingDeleteCount,
-  queueDelete,
-  queueDeleteAll,
-  type PendingDeletes,
-} from './history-delete';
+import { deleteEverything, queueDeletion, syncDeletes, type DeleteSyncCloud, type DeleteSyncStore } from './delete-sync';
+import { emptyPendingDeletes, NO_PENDING_DELETES, pendingFor, type PendingDeletes } from './history-delete';
 import { batches, planSync, toHistoryEntry } from './history-sync';
 import {
   clearInbox,
@@ -63,7 +53,12 @@ interface EntriesApi {
   // account too (the screen warns first, see history-delete.ts).
   remove(id: string): void;
   // Removes every entry except one being recorded; signed in, the whole shared history too
-  removeAll(): void;
+  // Deletes exactly these entries (the ones the warning counted). Signed in, Wispra Cloud deletes
+  // the whole history first; with no connection nothing is deleted and it throws. Returns how many
+  // entries left the phone.
+  // `asUser`: the account the warning spoke of (null: this phone only); if another is signed in
+  // now, nothing is deleted.
+  removeAll(shownIds: readonly string[], asUser: string | null): Promise<number>;
   // Try again on a recording that could not be transcribed
   retry(id: string): Promise<void>;
   // Ids of the entries being transcribed or written up right now
@@ -88,6 +83,13 @@ export interface SyncState {
 }
 
 const EntriesContext = createContext<EntriesApi | null>(null);
+
+// Wispra Cloud as delete-sync.ts sees it
+const deleteCloud: DeleteSyncCloud = {
+  deleteOne: deleteHistoryEntry,
+  deleteAll: deleteAllHistory,
+  read: (since, asUser) => readHistory(since, asUser),
+};
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -130,7 +132,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     } catch {
       // Kept in memory; tried again at the next change
     }
-    setSyncState((prev) => ({ ...prev, waitingDeletes: pendingDeleteCount(next) }));
+    setSyncState((prev) => ({ ...prev, waitingDeletes: next.ids.length }));
   }, []);
 
   // Returns whether the list reached the disk
@@ -174,11 +176,12 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       hidden.current = new Set();
     }
     try {
-      pendingDeletes.current = loadPendingDeletes();
+      // Another account's deletions (or a file from before they were tied to one) are dropped
+      pendingDeletes.current = pendingFor(loadPendingDeletes(), currentSession()?.userId ?? null);
     } catch {
       pendingDeletes.current = NO_PENDING_DELETES;
     }
-    setSyncState((prev) => ({ ...prev, waitingDeletes: pendingDeleteCount(pendingDeletes.current) }));
+    setSyncState((prev) => ({ ...prev, waitingDeletes: pendingDeletes.current.ids.length }));
     current.current = list;
     setEntries(list);
     setLoaded(true);
@@ -304,27 +307,40 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // The store as delete-sync.ts sees it: always the latest state, read again after every await
+  const deleteStore = useMemo<DeleteSyncStore>(
+    () => ({
+      userId: () => currentSession()?.userId ?? null,
+      pending: () => pendingDeletes.current,
+      setPending: (next) => setPendingDeletes(next),
+      entries: () => current.current,
+      removeLocal: (gone) => {
+        if (gone.length === 0) return;
+        const ids = new Set(gone.map((e) => e.id));
+        forget(gone);
+        commit(current.current.filter((e) => !ids.has(e.id)));
+      },
+    }),
+    [commit, forget, setPendingDeletes],
+  );
+
   const remove = useCallback(
     (id: string) => {
       const entry = current.current.find((e) => e.id === id);
       if (!entry) return;
-      forget([entry]);
-      // Signed in: deleted on every device of the account (sent now, or later if offline)
-      if (transcriptionAvailable()) setPendingDeletes(queueDelete(pendingDeletes.current, [entry]));
-      commit(current.current.filter((e) => e.id !== id));
+      // Signed in and in Wispra Cloud: deleted on every device of the account (sent now, or later
+      // if offline). Never queued for another account.
+      queueDeletion(deleteStore, entry);
+      deleteStore.removeLocal([entry]);
       void syncRef.current?.();
     },
-    [commit, forget, setPendingDeletes],
+    [deleteStore],
   );
 
-  const removeAll = useCallback(() => {
-    const gone = deletableEntries(current.current);
-    const goneIds = new Set(gone.map((e) => e.id));
-    forget(gone);
-    if (transcriptionAvailable()) setPendingDeletes(queueDeleteAll(pendingDeletes.current));
-    commit(current.current.filter((e) => !goneIds.has(e.id)));
-    void syncRef.current?.();
-  }, [commit, forget, setPendingDeletes]);
+  const removeAll = useCallback(
+    (shownIds: readonly string[], asUser: string | null) => deleteEverything(deleteStore, deleteCloud, shownIds, asUser),
+    [deleteStore],
+  );
 
   // Shares the phone's dictations with Wispra on the computer, and brings the computer's in.
   // Quietly does nothing when signed out, offline, or while Wispra Cloud has no shared history yet.
@@ -338,51 +354,12 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     syncing.current = true;
     syncAgain.current = false;
     try {
-      // 1. What this phone deleted goes first, so it cannot come back with the history read next
-      const waiting = pendingDeletes.current;
-      if (hasPendingDeletes(waiting)) {
-        try {
-          if (waiting.all) {
-            const clearedAt = await deleteAllHistory();
-            // This phone already deleted everything it had: the clear is not applied again
-            setPendingDeletes({
-              ...clearSent(pendingDeletes.current, { ...NO_PENDING_DELETES, all: true }),
-              clearedHandled: clearedAt ?? pendingDeletes.current.clearedHandled,
-            });
-          }
-          // One request per entry; each is cleared as soon as Wispra Cloud confirms it
-          for (const id of waiting.ids) {
-            await deleteHistoryEntry(id);
-            setPendingDeletes(clearSent(pendingDeletes.current, { ...NO_PENDING_DELETES, ids: [id] }));
-          }
-        } catch (err) {
-          // Until a delete-all reaches Wispra Cloud, nothing is read or shared: the history read now
-          // would bring back what the user deleted
-          if (pendingDeletes.current.all) throw err;
-        }
-      }
-
-      // 2. What other devices deleted leaves this phone: the ids in `deleted`, and after a new
-      // "delete everything" also the phone's dictations that never reached Wispra Cloud
-      const page = await readHistory(pendingDeletes.current.since);
-      const arrivedAt = new Date();
-      let { keep, removed } = applyRemoteDeletes(current.current, page.deleted);
-      const newClear = page.clearedAt && page.clearedAt !== pendingDeletes.current.clearedHandled ? page.clearedAt : null;
-      if (newClear && page.serverTime) {
-        const old = new Set(clearedBefore(keep, newClear, page.serverTime, arrivedAt).map((e) => e.id));
-        removed = [...removed, ...keep.filter((e) => old.has(e.id))];
-        keep = keep.filter((e) => !old.has(e.id));
-      }
-      if (removed.length > 0) {
-        forget(removed);
-        commit(keep);
-      }
-      // `since` moves on only after a good answer, so no deletion is missed
-      setPendingDeletes({
-        ...pendingDeletes.current,
-        since: page.serverTime ?? pendingDeletes.current.since,
-        clearedHandled: newClear ?? pendingDeletes.current.clearedHandled,
-      });
+      // 1-2. Deletions both ways (delete-sync.ts), then the history read with them
+      const result = await syncDeletes(deleteStore, deleteCloud, () => new Date());
+      if (!result) return;
+      const { page } = result;
+      const user = deleteStore.userId();
+      if (!user) return;
 
       // 3. New dictations both ways; deleted ones are never brought back
       const skip = new Set([...hidden.current, ...pendingDeletes.current.ids, ...page.deleted]);
@@ -394,7 +371,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
         commit([...kept, ...plan.upserts.filter((e) => !known.has(e.id))]);
       }
       for (const batch of batches(plan.push)) {
-        await mergeHistory(batch.map(toHistoryEntry));
+        await mergeHistory(batch.map(toHistoryEntry), user);
         const ids = new Set(batch.map((e) => e.id));
         const at = new Date().toISOString();
         commit(current.current.map((e) => (ids.has(e.id) ? { ...e, syncedAt: at } : e)));
@@ -406,7 +383,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       syncing.current = false;
     }
     if (syncAgain.current) void syncRef.current?.();
-  }, [commit, forget, setPendingDeletes]);
+  }, [commit, deleteStore]);
   syncRef.current = syncHistory;
 
   const mark = useCallback((id: string, on: boolean) => {
@@ -625,6 +602,9 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     if (!loaded) return;
     void transcribeWaiting();
     const unsubscribe = onSignInChange((session) => {
+      // Signing out, or into another account, drops the previous account's deletions and cursor
+      const user = session?.userId ?? null;
+      if (pendingDeletes.current.userId !== user) setPendingDeletes(emptyPendingDeletes(user));
       if (session) void transcribeWaiting();
     });
     const sub = AppState.addEventListener('change', (state) => {
@@ -634,7 +614,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       unsubscribe();
       sub.remove();
     };
-  }, [loaded, transcribeWaiting]);
+  }, [loaded, transcribeWaiting, setPendingDeletes]);
 
   const api = useMemo(
     () => ({
