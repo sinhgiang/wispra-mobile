@@ -33,5 +33,18 @@ class WispraDictationModule : Module() {
     Function("setBubbleEnabled") { enabled: Boolean ->
       DictationPrefs.setBubbleEnabled(context, enabled)
     }
+
+    // The Wispra Cloud sign-in (JSON), kept in one place for the app and the mic-button service
+    Function("getSession") {
+      CloudSession.getJson(context)
+    }
+
+    Function("setSession") { json: String? ->
+      CloudSession.setJson(context, json)
+    }
+
+    Function("setCloudConfig") { apiBase: String, supabaseUrl: String, publishableKey: String ->
+      CloudSession.setConfig(context, apiBase, supabaseUrl, publishableKey)
+    }
   }
 }

@@ -6,6 +6,9 @@ interface NativeWispraDictation {
   openAccessibilitySettings(): void;
   isBubbleEnabled(): boolean;
   setBubbleEnabled(enabled: boolean): void;
+  getSession(): string | null;
+  setSession(json: string | null): void;
+  setCloudConfig(apiBase: string, supabaseUrl: string, publishableKey: string): void;
 }
 
 // Android only: the mic button over other apps' text fields. iPhone gets the Wispra keyboard instead.
@@ -27,4 +30,18 @@ export function isBubbleEnabled(): boolean {
 
 export function setBubbleEnabled(enabled: boolean): void {
   native?.setBubbleEnabled(enabled);
+}
+
+// The Wispra Cloud sign-in (JSON), kept where the mic-button service can use it too
+export function getSession(): string | null {
+  return native?.getSession() ?? null;
+}
+
+export function setSession(json: string | null): void {
+  native?.setSession(json);
+}
+
+// Where the service sends dictations to be transcribed
+export function setCloudConfig(apiBase: string, supabaseUrl: string, publishableKey: string): void {
+  native?.setCloudConfig(apiBase, supabaseUrl, publishableKey);
 }

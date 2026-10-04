@@ -13,7 +13,6 @@ import { Platform } from 'react-native';
 import { createEntry, type EntryKind } from './entries';
 import { useEntries } from './entries-store';
 import { keepAudio } from './storage';
-import { transcriptionAvailable } from './transcriber';
 
 // Speech, not music: mono AAC at 16 kHz and 32 kbps is about 14 MB an hour, small enough to send
 // for transcription. Written straight into the document directory, which the system never clears.
@@ -33,7 +32,7 @@ const CHECKPOINT_MS = 10_000;
 export function useRecording(kind: EntryKind) {
   const recorder = useAudioRecorder(SPEECH_RECORDING);
   const state = useAudioRecorderState(recorder, 250);
-  const { add, update, get, remove, retry } = useEntries();
+  const { add, update, get, remove, transcribeWaiting } = useEntries();
   const [phase, setPhase] = useState<RecordingPhase>('idle');
   const [entryId, setEntryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -114,9 +113,9 @@ export function useRecording(kind: EntryKind) {
     await setAudioModeAsync({ allowsRecording: false, allowsBackgroundRecording: false });
     setEntryId(null);
     setPhase('idle');
-    if (transcriptionAvailable()) void retry(id);
+    void transcribeWaiting();
     return id;
-  }, [entryId, get, recorder, retry, update]);
+  }, [entryId, get, recorder, transcribeWaiting, update]);
 
   // Stops and throws the recording away
   const cancel = useCallback(async () => {

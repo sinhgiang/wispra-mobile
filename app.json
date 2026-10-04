@@ -5,7 +5,10 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/brand/wispra-icon.png",
-    "scheme": "wispramobile",
+    "scheme": [
+      "wispramobile",
+      "wispra"
+    ],
     "userInterfaceStyle": "dark",
     "ios": {
       "bundleIdentifier": "com.sinhgiang.wispramobile"
@@ -38,7 +41,8 @@
           "microphonePermission": "Wispra records your voice to turn it into text.",
           "enableBackgroundRecording": true
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -48,6 +52,11 @@
       "router": {},
       "eas": {
         "projectId": "1dd82f99-15b5-4b7d-b05e-5cb109f05b93"
+      },
+      "wispraCloud": {
+        "apiBase": "https://wispra-web.vercel.app",
+        "supabaseUrl": "https://tpiycamfsagesjeciubg.supabase.co",
+        "supabasePublishableKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwaXljYW1mc2FnZXNqZWNpdWJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0OTA1MTAsImV4cCI6MjA5NzA2NjUxMH0.qxMVAbBSsBhWOeB5Xak_eQthjcI-wXGo87P7bVcoStU"
       }
     },
     "owner": "sinhgiang",

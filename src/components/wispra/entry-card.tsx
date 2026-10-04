@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Button } from './ui';
@@ -33,14 +32,10 @@ export function EntryCard({ entry, onPress }: { entry: Entry; onPress?: () => vo
 // A recording whose words are not text yet. It is never dropped: it stays here until it is
 // transcribed or the user deletes it.
 export function PendingCard({ entry, onPress }: { entry: Entry; onPress?: () => void }) {
-  const { retry, remove } = useEntries();
-  const [busy, setBusy] = useState(false);
+  const { retry, remove, busy: transcribing } = useEntries();
+  const busy = transcribing.has(entry.id);
 
-  const tryAgain = async () => {
-    setBusy(true);
-    await retry(entry.id);
-    setBusy(false);
-  };
+  const tryAgain = () => void retry(entry.id);
 
   const confirmDelete = () =>
     Alert.alert('Delete this recording?', 'The audio has not been transcribed. It cannot be brought back.', [
@@ -54,7 +49,7 @@ export function PendingCard({ entry, onPress }: { entry: Entry; onPress?: () => 
         {entry.kind === 'meeting' || entry.title !== 'Dictation' ? entry.title : 'Recording'} not transcribed yet ·{' '}
         {formatDuration(entry.durationMs)}
       </Text>
-      <Text style={styles.pendingNote}>{entry.error ?? 'The audio is kept on this phone.'}</Text>
+      <Text style={styles.pendingNote}>{busy ? 'Transcribing with Wispra Cloud…' : (entry.error ?? 'The audio is kept on this phone.')}</Text>
       <View style={styles.actions}>
         <Button small kind="primary" label={busy ? 'Trying…' : 'Try again'} disabled={busy} onPress={tryAgain} />
         <Button small label="Delete" onPress={confirmDelete} />

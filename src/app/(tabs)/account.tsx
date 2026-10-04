@@ -1,15 +1,22 @@
 import Constants from 'expo-constants';
-import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Body, Card, Title, ui } from '@/components/wispra/ui';
+import { Body, Button, Card, Title, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
+import { signOut } from '@/lib/cloud-auth';
 import { formatDuration, needsTranscription } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
+import { signInWithGoogle } from '@/lib/sign-in';
+import { useSession } from '@/lib/use-session';
 
 export default function AccountScreen() {
   const { entries } = useEntries();
+  const session = useSession();
+  const [signingIn, setSigningIn] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const stats = useMemo(() => {
     const waiting = entries.filter(needsTranscription);
     return {
@@ -19,18 +26,56 @@ export default function AccountScreen() {
     };
   }, [entries]);
 
+  const signIn = async () => {
+    setError(null);
+    setSigningIn(true);
+    const result = await signInWithGoogle();
+    setSigningIn(false);
+    if (!result.ok && !result.cancelled) setError(result.error ?? 'Sign-in did not finish. Try again.');
+  };
+
+  const confirmSignOut = () =>
+    Alert.alert('Sign out of Wispra Cloud?', 'Recordings stay on this phone. They are transcribed again once you sign back in.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', style: 'destructive', onPress: () => void signOut() },
+    ]);
+
   return (
     <SafeAreaView edges={['top']} style={ui.screen}>
       <ScrollView contentContainerStyle={styles.content}>
         <Title>Account</Title>
 
-        <Card>
-          <Text style={styles.cardTitle}>Wispra Cloud</Text>
-          <Body style={styles.note}>
-            Signing in with your Wispra account, the same one as Wispra on your computer, is coming in the next update.
-            It turns your recordings into text.
-          </Body>
-        </Card>
+        {session ? (
+          <Card style={styles.account}>
+            <View style={styles.who}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{(session.email || '?').charAt(0).toUpperCase()}</Text>
+              </View>
+              <View style={styles.whoText}>
+                <Text style={styles.email} numberOfLines={1}>
+                  {session.email || 'Signed in'}
+                </Text>
+                <Text style={styles.note}>Signed in with Google</Text>
+              </View>
+            </View>
+            <Text style={styles.note}>Same account as Wispra on your computer. Your recordings are transcribed with Wispra Cloud.</Text>
+            <View style={styles.action}>
+              <Button small label="Sign out" onPress={confirmSignOut} />
+            </View>
+          </Card>
+        ) : (
+          <Card style={styles.account}>
+            <Text style={styles.cardTitle}>Wispra Cloud</Text>
+            <Body style={styles.note}>
+              Sign in with the same Google account as Wispra on your computer. Wispra Cloud turns your recordings into
+              text; until then they wait on this phone.
+            </Body>
+            <View style={styles.action}>
+              <Button kind="primary" label={signingIn ? 'Signing in…' : 'Sign in with Google'} disabled={signingIn} onPress={signIn} />
+            </View>
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+          </Card>
+        )}
 
         <View style={styles.rows}>
           <Row label="Saved on this phone" value={`${stats.count}`} />
@@ -56,8 +101,16 @@ function Row({ label, value, last }: { label: string; value: string; last?: bool
 
 const styles = StyleSheet.create({
   content: { padding: Gap.xl, paddingTop: Gap.xl + 16, gap: Gap.l },
+  account: { gap: Gap.m, padding: 16, borderRadius: 16 },
+  who: { flexDirection: 'row', alignItems: 'center', gap: Gap.m },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: W.accentDeep, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: W.text, fontWeight: '700', fontSize: 16 },
+  whoText: { flex: 1, minWidth: 0 },
+  email: { color: W.text, fontSize: 15, fontWeight: '600' },
   cardTitle: { color: W.text, fontSize: 15, fontWeight: '600' },
-  note: { color: W.muted, fontSize: 13, lineHeight: 19 },
+  note: { color: W.muted, fontSize: 12, lineHeight: 18 },
+  action: { flexDirection: 'row' },
+  error: { color: W.red, fontSize: 13 },
   rows: { backgroundColor: W.surface, borderRadius: 16 },
   row: { minHeight: 52, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   rowLine: { borderBottomWidth: 1, borderBottomColor: W.line },

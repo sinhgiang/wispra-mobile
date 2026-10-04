@@ -13,7 +13,7 @@ data class InboxEntry(
   val durationMs: Long,
   val audioFileName: String,
   val sourceApp: String?,
-  // Set once the words have been typed into the field; null while transcription waits
+  // The transcribed words; null while transcription waits
   val text: String?,
 ) {
   fun toJson(): String = buildString {

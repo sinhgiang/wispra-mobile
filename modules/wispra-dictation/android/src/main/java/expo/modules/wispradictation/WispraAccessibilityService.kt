@@ -55,17 +55,20 @@ class WispraAccessibilityService : AccessibilityService() {
     super.onServiceConnected()
     recorder = DictationRecorder(this)
     bubble = Bubble(this, onMic = ::startDictation, onStop = ::finishDictation, onCancel = ::cancelDictation)
-    useTestTranscriptInDebugBuilds()
+    Transcribers.current = transcriber()
   }
 
-  // Debug builds only: until Wispra Cloud transcription is in (part 2), a test can put words in
-  // files/wispra/test-transcript.txt to check that they are typed into the other app's field.
-  // Release builds never read this file.
-  private fun useTestTranscriptInDebugBuilds() {
+  // Wispra Cloud, with the sign-in made in the app. Debug builds first look for words in
+  // files/wispra/test-transcript.txt, so a test can check the typing without speaking to the
+  // cloud; release builds never read that file.
+  private fun transcriber(): Transcriber {
+    val cloud = CloudTranscriber(this)
     val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-    if (!debuggable || Transcribers.current != null) return
-    val file = File(filesDir, "wispra/test-transcript.txt")
-    Transcribers.current = Transcriber { if (file.exists()) file.readText().trim().ifEmpty { null } else null }
+    if (!debuggable) return cloud
+    val testFile = File(filesDir, "wispra/test-transcript.txt")
+    return Transcriber { audio, durationMs ->
+      if (testFile.exists()) testFile.readText().trim().ifEmpty { null } else cloud.transcribe(audio, durationMs)
+    }
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -137,22 +140,25 @@ class WispraAccessibilityService : AccessibilityService() {
     main.removeCallbacks(tick)
     val length = recorder.stop()
     leaveForeground()
-    bubble.showIdle()
+    bubble.showWorking()
     val field = target
     worker.execute {
       val text = try {
-        Transcribers.current?.transcribe(pending.audio)
+        Transcribers.current?.transcribe(pending.audio, length)
       } catch (_: Exception) {
         null
       }
       main.post {
+        bubble.showIdle()
         val typed = text != null && field != null && typeInto(field, text)
-        save(pending, length, if (typed) text else null)
+        // With text the History entry is complete; without, the app transcribes it later
+        save(pending, length, text)
         toast(
           when {
             typed -> "Typed by Wispra"
-            text != null -> "Saved in Wispra History. The field was gone, so nothing was typed."
-            else -> "Saved in Wispra History. Typing the words here needs Wispra Cloud sign-in, coming soon."
+            text != null -> "The field was gone, so nothing was typed. The words are in Wispra History."
+            CloudSession.getJson(this) == null -> "Saved in Wispra History. Sign in to Wispra Cloud in the Wispra app to type your words."
+            else -> "Could not transcribe right now. Saved in Wispra History; it is tried again when you open Wispra."
           },
         )
       }

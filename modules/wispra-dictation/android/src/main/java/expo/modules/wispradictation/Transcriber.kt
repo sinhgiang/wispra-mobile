@@ -6,11 +6,10 @@ import java.io.File
  * Turns a dictation into text. Runs on a background thread. Returns null when the words cannot be
  * transcribed now; the audio then waits in History with Try again.
  *
- * Transcription goes through Wispra Cloud, which needs the account sign-in (part 2 of the mobile
- * work). Until then no transcriber is set and every dictation waits.
+ * The service uses CloudTranscriber (Wispra Cloud, needs the sign-in made in the app).
  */
 fun interface Transcriber {
-  fun transcribe(audio: File): String?
+  fun transcribe(audio: File, durationMs: Long): String?
 }
 
 object Transcribers {

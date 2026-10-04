@@ -61,7 +61,7 @@ export default function DictateScreen() {
             <Text style={styles.saved}>
               {transcriptionAvailable()
                 ? 'Saved. Transcribing…'
-                : 'Saved to History. It will be transcribed once Wispra Cloud sign-in is in the app.'}
+                : 'Saved to History. Sign in to Wispra Cloud in Account to turn it into text.'}
             </Text>
           ) : null}
         </Card>

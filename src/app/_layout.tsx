@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
 import { W } from '@/constants/wispra';
+import { loadSession } from '@/lib/cloud-auth';
 import { EntriesProvider, useEntries } from '@/lib/entries-store';
 
 SplashScreen.preventAutoHideAsync();
@@ -22,6 +23,11 @@ function HideSplashWhenLoaded() {
 }
 
 export default function RootLayout() {
+  // The Wispra Cloud sign-in kept from last time
+  useEffect(() => {
+    void loadSession();
+  }, []);
+
   return (
     <ThemeProvider value={theme}>
       <EntriesProvider>

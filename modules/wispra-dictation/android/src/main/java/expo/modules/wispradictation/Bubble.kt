@@ -41,7 +41,13 @@ class Bubble(
     contentDescription = "Dictate with Wispra"
     addView(icon, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
     addView(square, FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
-    setOnClickListener { if (listening) onStop() else onMic() }
+    setOnClickListener {
+      when {
+        working -> Unit
+        listening -> onStop()
+        else -> onMic()
+      }
+    }
   }
   private val label = chip("Tap to speak", Color.parseColor("#111827"))
   private val cancel = chip("Cancel", Color.parseColor("#374151")).apply {
@@ -65,6 +71,7 @@ class Bubble(
   private var attached = false
   var listening = false
     private set
+  private var working = false
 
   init {
     showIdle()
@@ -93,11 +100,23 @@ class Bubble(
 
   fun showIdle() {
     listening = false
+    working = false
     button.background = circle(accent)
     button.contentDescription = "Dictate with Wispra"
     icon.visibility = View.VISIBLE
     square.visibility = View.GONE
     label.text = "Tap to speak"
+    cancel.visibility = View.GONE
+  }
+
+  /** After ■, while the words are being transcribed and typed */
+  fun showWorking() {
+    listening = false
+    working = true
+    button.background = circle(Color.parseColor("#4B5563"))
+    icon.visibility = View.VISIBLE
+    square.visibility = View.GONE
+    label.text = "Transcribing…"
     cancel.visibility = View.GONE
   }
 

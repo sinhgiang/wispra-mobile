@@ -80,8 +80,9 @@ export default function RecordMeetingScreen() {
         <Card>
           <Label>Live transcript</Label>
           <Body style={styles.note}>
-            The audio is being saved on this phone and keeps recording when the screen locks. Live transcript,
-            topics and action items come with Wispra Cloud sign-in in the next update.
+            The audio is being saved on this phone and keeps recording when the screen locks. When you stop, it is
+            transcribed with Wispra Cloud if you are signed in. Live transcript, topics and action items come in the
+            next update.
           </Body>
         </Card>
         {entry && entry.bookmarks.length > 0 ? (

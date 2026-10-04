@@ -82,8 +82,8 @@ export default function DictationSetupScreen() {
 
         <Card style={styles.notice}>
           <Text style={styles.noticeText}>
-            In this version your dictations are saved in History. Typing the words into the field starts once Wispra
-            Cloud sign-in is in the app.
+            Your words are typed into the field once you are signed in to Wispra Cloud (Account tab). Without
+            sign-in, each dictation waits in History and is transcribed later.
           </Text>
         </Card>
 
