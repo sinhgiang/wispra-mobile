@@ -104,11 +104,11 @@ export function choiceText(previous: DataOwner, next: SignedIn, data: PhoneData)
     intro: `This phone has ${what} from ${previous.email || 'the previous account'}. You are now signed in as ${next.email || 'a new account'}. Choose what happens to them. Nothing is synced until you choose.`,
     merge: {
       label: `Merge into ${next.email || 'the new account'}`,
-      detail: `Keep the ${what} on this phone and sync them with ${next.email || 'the new account'}: they go up to its Wispra Cloud and appear on its other devices.`,
+      detail: `Keep the ${what} on this phone and sync them with ${next.email || 'the new account'}: the dictations go up to its Wispra Cloud and appear on its other devices. Meetings stay on this phone only: Wispra Cloud does not keep meetings from the phone.`,
     },
     newOnly: {
       label: `Use only ${next.email || 'the new account'}`,
-      detail: `Remove the ${what} of ${previous.email || 'the previous account'} from this phone and take everything from ${next.email || 'the new account'}. Nothing is deleted in the Wispra Cloud of ${previous.email || 'the previous account'}; sign in to it again to get its shared history back.${lost}`,
+      detail: `Remove the ${what} of ${previous.email || 'the previous account'} from this phone and take the dictation history of ${next.email || 'the new account'} from Wispra Cloud. Nothing is deleted in the Wispra Cloud of ${previous.email || 'the previous account'}; sign in to it again to get its shared dictations back.${lost} Meetings of ${next.email || 'the new account'} made on other devices cannot be brought to this phone.`,
     },
   };
 }
@@ -126,4 +126,74 @@ export function parseOwner(text: string | null): DataOwner | null {
 
 export function serializeOwner(owner: DataOwner): string {
   return JSON.stringify({ userId: owner.userId, email: owner.email });
+}
+
+// What the question shows, and exactly which entries it counted (the choice is bound to them)
+export interface AccountChoiceView {
+  data: PhoneData;
+  text: ChoiceText;
+  shownIds: string[];
+}
+
+export function choiceView(owner: DataOwner | null, session: SignedIn | null, entries: Entry[]): AccountChoiceView | null {
+  if (!owner || !session || !needsChoice(owner, session)) return null;
+  const data = phoneData(entries);
+  return { data, text: choiceText(owner, session, data), shownIds: settled(entries).map((e) => e.id) };
+}
+
+/**
+ * - done: applied
+ * - changed: the entries are no longer the ones the question counted (a dictation came in from the
+ *   mic button, a recording ended): nothing was changed; the question is shown again, updated
+ * - save-failed: the new list could not be saved: nothing was changed, no file deleted, the owner
+ *   is still the previous account
+ * - not-needed: no choice is waiting any more (signed out, or the same account again)
+ */
+export type ChoiceResult = 'done' | 'changed' | 'save-failed' | 'not-needed';
+
+export interface ChoiceDeps {
+  session(): SignedIn | null;
+  owner(): DataOwner | null;
+  // The latest entries
+  entries(): Entry[];
+  // Saves the list; false when it did not reach the disk
+  saveEntries(list: Entry[]): boolean;
+  deleteAudio(uri: string): void;
+  saveOwner(owner: DataOwner): void;
+  // The new account's history is read afresh (without `since`), as on the computer: a "delete
+  // everything" from before is only noted and never deletes what was just merged in; deleted ids
+  // still apply
+  resetReadCursor(userId: string): void;
+  makeId?: () => string;
+}
+
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
+}
+
+export function applyAccountChoice(deps: ChoiceDeps, choice: AccountChoice, shownIds: readonly string[]): ChoiceResult {
+  const session = deps.session();
+  const owner = deps.owner();
+  if (!session || !needsChoice(owner, session)) return 'not-needed';
+  const entries = deps.entries();
+  if (!sameIds(settled(entries).map((e) => e.id), shownIds)) return 'changed';
+
+  if (choice === 'merge') {
+    if (!deps.saveEntries(mergeIntoNewAccount(entries, deps.makeId))) return 'save-failed';
+  } else {
+    // The list without the previous account's entries is saved first; only then do their audio
+    // files go. Nothing is sent to the previous account's Wispra Cloud.
+    const { keep, removed } = leaveForNewAccount(entries);
+    if (!deps.saveEntries(keep)) return 'save-failed';
+    for (const e of removed) {
+      for (const uri of [e.audioUri, ...(e.segments ?? []).map((s) => s.uri)]) {
+        if (uri) deps.deleteAudio(uri);
+      }
+    }
+  }
+  deps.resetReadCursor(session.userId);
+  deps.saveOwner({ userId: session.userId, email: session.email });
+  return 'done';
 }

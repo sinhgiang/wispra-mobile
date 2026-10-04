@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { FakeCloud, fakeAuth } from '../__fixtures__/fake-cloud';
+import { FakeStore } from '../__fixtures__/fake-store';
 import {
+  applyAccountChoice,
   choiceText,
+  choiceView,
   leaveForNewAccount,
   mergeIntoNewAccount,
   needsChoice,
@@ -11,6 +14,7 @@ import {
   phoneData,
   serializeOwner,
   syncAllowed,
+  type ChoiceDeps,
   type DataOwner,
 } from '../account-switch';
 import { createEntry, type Entry } from '../entries';
@@ -20,7 +24,11 @@ jest.mock('../cloud-auth', () => require('../__fixtures__/fake-cloud').fakeAuth)
 jest.mock('../cloud-config', () => ({ cloud: { apiBase: 'https://cloud.test' } }));
 
 // eslint-disable-next-line import/first
-import { mergeHistory, readHistory } from '../cloud-history';
+import { deleteAllHistory, deleteHistoryEntry, mergeHistory, readHistory } from '../cloud-history';
+// eslint-disable-next-line import/first
+import { syncDeletes, type DeleteSyncCloud } from '../delete-sync';
+
+const realCloud: DeleteSyncCloud = { deleteOne: deleteHistoryEntry, deleteAll: deleteAllHistory, read: (since, asUser) => readHistory(since, asUser) };
 
 const at = new Date('2026-10-05T08:00:00.000Z');
 function dictation(over: Partial<Entry>): Entry {
@@ -86,7 +94,9 @@ describe('what the question says', () => {
       'This phone has 3 dictations and 1 meeting from anna@example.com. You are now signed in as ben@example.com. Choose what happens to them. Nothing is synced until you choose.',
     );
     expect(t.merge.label).toBe('Merge into ben@example.com');
-    expect(t.merge.detail).toContain("they go up to its Wispra Cloud");
+    expect(t.merge.detail).toContain("the dictations go up to its Wispra Cloud");
+    expect(t.merge.detail).toContain("Meetings stay on this phone only");
+    expect(t.newOnly.detail).toContain("Meetings of ben@example.com made on other devices cannot be brought to this phone");
     expect(t.newOnly.label).toBe('Use only ben@example.com');
     expect(t.newOnly.detail).toContain('Nothing is deleted in the Wispra Cloud of anna@example.com');
     expect(t.newOnly.detail).toContain('2 of them are only on this phone');
@@ -116,16 +126,27 @@ describe('Use only the new account', () => {
   });
 });
 
-describe('the two choices against a fake Wispra Cloud', () => {
+describe('choosing, through applyAccountChoice (the path the app runs)', () => {
   let server: FakeCloud;
+  let store: FakeStore;
   const realFetch = global.fetch;
+  const clock = () => new Date(server.now);
+
+  // Anna's phone, as in the question; Ben signs in
+  function annaThenBen(): string[] {
+    store.list = annasPhone.map((e) => ({ ...e, audioUri: e.kind === 'meeting' ? null : `file:///audio/${e.id}.m4a` }));
+    store.dataOwner = anna;
+    fakeAuth.user = 'user-b';
+    const view = choiceView(store.owner(), store.session(), store.entries());
+    return view!.shownIds;
+  }
 
   beforeEach(() => {
     server = new FakeCloud();
+    store = new FakeStore();
     global.fetch = server.fetch as unknown as typeof fetch;
     server.account('user-a').entries = [{ id: 'mobile-shared', text: 'Hello', createdAt: at.toISOString() }];
     server.account('user-b').entries = [{ id: 'desk-ben', text: 'Ben on his computer', createdAt: at.toISOString() }];
-    fakeAuth.user = 'user-b';
   });
 
   afterEach(() => {
@@ -133,25 +154,112 @@ describe('the two choices against a fake Wispra Cloud', () => {
     fakeAuth.user = null;
   });
 
-  it('Use only the new account: nothing is sent about Anna, her cloud is intact, Ben’s history comes in', async () => {
-    const { keep } = leaveForNewAccount(annasPhone);
-    const page = await readHistory(null, 'user-b');
-    const plan = planSync(keep, page.entries, new Set(), page.complete);
-    expect(plan.push).toEqual([]);
-    expect(plan.upserts.map((e) => e.id)).toEqual(['desk-ben']);
-    expect(server.requests.filter((r) => r.method !== 'GET')).toEqual([]);
+  it('asks nothing on the first sign-in or when the same account signs in again', () => {
+    fakeAuth.user = 'user-a';
+    expect(choiceView(null, store.session(), annasPhone)).toBeNull();
+    expect(choiceView(anna, store.session(), annasPhone)).toBeNull();
+    expect(applyAccountChoice(bind(store), 'new-only', [])).toBe('not-needed');
+    expect(store.log).toEqual([]);
+  });
+
+  it('counts exactly the entries a choice applies to (not a recording in progress)', () => {
+    expect(annaThenBen()).toEqual(['mobile-shared', 'mobile-unshared', 'pc-1', 'mobile-meeting']);
+  });
+
+  it('syncs nothing while the question waits', () => {
+    annaThenBen();
+    expect(syncAllowed(store.owner(), store.session())).toBe(false);
+    expect(server.requests).toEqual([]);
+  });
+
+  it('Use only: saves the new list first, then deletes the audio, then takes Ben as owner; nothing goes to Anna’s cloud', async () => {
+    const shown = annaThenBen();
+    expect(applyAccountChoice(bind(store), 'new-only', shown)).toBe('done');
+    expect(store.list.map((e) => e.id)).toEqual(['mobile-recording']);
+    expect(store.log[0]).toBe('saved');
+    expect(store.log.filter((l) => l.startsWith('deleted'))).toHaveLength(3);
+    expect(store.log.at(-1)).toBe('owner user-b');
+    expect(syncAllowed(store.owner(), store.session())).toBe(true);
+
+    // Ben's first sync after the choice
+    await syncDeletes(store, realCloud, clock);
+    expect(server.requests.every((r) => r.user === 'user-b' && r.method === 'GET')).toBe(true);
     expect(server.account('user-a').entries.map((e) => e.id)).toEqual(['mobile-shared']);
     expect(server.account('user-a').marks).toEqual([]);
   });
 
-  it('Merge: the phone’s dictations go up to Ben’s cloud, as Ben; Anna’s cloud is untouched', async () => {
+  it('Use only: when the list cannot be saved, nothing is deleted and Anna stays the owner', () => {
+    const shown = annaThenBen();
+    store.failSaves = true;
+    expect(applyAccountChoice(bind(store), 'new-only', shown)).toBe('save-failed');
+    expect(store.deletedAudio).toEqual([]);
+    expect(store.dataOwner).toBe(anna);
+    expect(store.list).toHaveLength(5);
+  });
+
+  it('refuses when a dictation came in from the mic button after the question was shown', () => {
+    const shown = annaThenBen();
+    store.list = [...store.list, dictation({ id: 'mobile-from-inbox' })];
+    expect(applyAccountChoice(bind(store), 'new-only', shown)).toBe('changed');
+    expect(store.log).toEqual([]);
+    expect(store.list).toHaveLength(6);
+    // The question shown again counts it
+    expect(choiceView(store.owner(), store.session(), store.entries())?.data.dictations).toBe(4);
+  });
+
+  it('refuses when the recording in progress ended after the question was shown', () => {
+    const shown = annaThenBen();
+    store.list = store.list.map((e) => (e.id === 'mobile-recording' ? { ...e, status: 'pending' as const } : e));
+    expect(applyAccountChoice(bind(store), 'new-only', shown)).toBe('changed');
+    expect(store.deletedAudio).toEqual([]);
+  });
+
+  it('Merge: Ben’s cloud gets the phone’s dictations, as Ben; Anna’s cloud is untouched', async () => {
+    const shown = annaThenBen();
     let n = 0;
-    const merged = mergeIntoNewAccount(annasPhone, () => `mobile-new-${++n}`);
-    const page = await readHistory(null, 'user-b');
-    const plan = planSync(merged, page.entries, new Set(), page.complete);
+    expect(applyAccountChoice({ ...bind(store), makeId: () => `mobile-new-${++n}` }, 'merge', shown)).toBe('done');
+    expect(store.dataOwner).toEqual({ userId: 'user-b', email: 'user-b@example.com' });
+
+    const result = await syncDeletes(store, realCloud, clock);
+    const plan = planSync(store.list, result!.page.entries, new Set(), result!.page.complete);
     for (const batch of batches(plan.push)) await mergeHistory(batch.map(toHistoryEntry), 'user-b');
     expect(server.account('user-b').entries.map((e) => e.id).sort()).toEqual(['desk-ben', 'mobile-new-1', 'mobile-shared', 'mobile-unshared']);
-    expect(server.requests.filter((r) => r.method === 'POST').every((r) => r.user === 'user-b')).toBe(true);
+    expect(server.requests.filter((r) => r.method !== 'GET').every((r) => r.user === 'user-b')).toBe(true);
     expect(server.account('user-a').entries.map((e) => e.id)).toEqual(['mobile-shared']);
   });
+
+  it('Merge into an account that read its history here before and was cleared since: the merged entries stay, deleted ids still apply', async () => {
+    // Ben used this phone before (his since is old); then everything of Ben was deleted on his computer
+    store.setPending({ userId: 'user-b', ids: [], since: '2026-10-05T11:00:00.000Z', clearedHandled: null });
+    server.account('user-b').entries.push({ id: 'mobile-gone', text: 'x', createdAt: at.toISOString() });
+    server.deleteAll('user-b');
+    server.tick(10);
+
+    annaThenBen();
+    store.list = [...store.list, dictation({ id: 'mobile-gone', syncedAt: at.toISOString() })];
+    const shown = choiceView(store.owner(), store.session(), store.entries())!.shownIds;
+    expect(applyAccountChoice(bind(store), 'merge', shown)).toBe('done');
+    expect(store.pending().since).toBeNull();
+
+    await syncDeletes(store, realCloud, clock);
+    const ids = store.list.map((e) => e.id);
+    // Anna's dictations, made long before Ben's clear, are kept to be shared
+    expect(ids).toEqual(expect.arrayContaining(['mobile-shared', 'mobile-unshared', 'mobile-meeting']));
+    // An id Ben deleted is still deleted
+    expect(ids).not.toContain('mobile-gone');
+    expect(store.pending().clearedHandled).toBe('2026-10-05T12:00:00.000Z');
+  });
 });
+
+// The store's methods, bound, so they can be spread into deps
+function bind(store: FakeStore): ChoiceDeps {
+  return {
+    session: () => store.session(),
+    owner: () => store.owner(),
+    entries: () => store.entries(),
+    saveEntries: (list) => store.saveEntries(list),
+    deleteAudio: (uri) => store.deleteAudio(uri),
+    saveOwner: (owner) => store.saveOwner(owner),
+    resetReadCursor: (userId) => store.resetReadCursor(userId),
+  };
+}

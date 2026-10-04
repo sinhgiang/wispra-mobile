@@ -19,11 +19,28 @@ export default function AccountSwitchScreen() {
   }, []);
 
   useEffect(() => {
-    if (!accountChoice) router.replace('/dictate');
+    // Chosen (or nothing to choose any more): back to where the user was
+    if (!accountChoice) {
+      if (router.canGoBack()) router.back();
+      else router.replace('/dictate');
+    }
   }, [accountChoice]);
 
   if (!accountChoice) return <SafeAreaView style={ui.screen} />;
-  const { text, data } = accountChoice;
+  const { text, data, shownIds } = accountChoice;
+
+  // The choice applies to exactly the entries this screen counted (shownIds)
+  const apply = (choice: AccountChoice) => {
+    const result = chooseAccount(choice, shownIds);
+    if (result === 'changed') {
+      Alert.alert(
+        'The recordings on this phone changed',
+        'A recording came in or ended while you were choosing. Nothing was changed. Look at the numbers again and choose.',
+      );
+    } else if (result === 'save-failed') {
+      Alert.alert('Could not save', 'Nothing was changed and nothing was deleted. Free some space on the phone and try again.');
+    }
+  };
 
   const choose = (choice: AccountChoice) => {
     if (choice === 'new-only' && data.onlyHere > 0) {
@@ -32,12 +49,12 @@ export default function AccountSwitchScreen() {
         `${data.onlyHere === 1 ? '1 recording is' : `${data.onlyHere} recordings are`} only on this phone (meetings, and dictations not shared yet). They cannot be brought back.`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: text.newOnly.label, style: 'destructive', onPress: () => chooseAccount('new-only') },
+          { text: text.newOnly.label, style: 'destructive', onPress: () => apply('new-only') },
         ],
       );
       return;
     }
-    chooseAccount(choice);
+    apply(choice);
   };
 
   return (

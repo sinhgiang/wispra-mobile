@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { FakeCloud, fakeAuth } from '../__fixtures__/fake-cloud';
+import { FakeStore } from '../__fixtures__/fake-store';
 import { createEntry, type Entry } from '../entries';
 import { EMPTY_BOOK, emptyPendingDeletes, parseDeletionBook, serializeDeletionBook, stateOf, withState, type DeletionBook, type PendingDeletes } from '../history-delete';
 
@@ -17,34 +18,6 @@ function dictation(over: Partial<Entry>): Entry {
   return { ...createEntry('dictation', at, 'mobile-a'), status: 'done', text: 'Hello', ...over };
 }
 
-// The app's store without React: entries in memory, pending-deletes.json as text
-class FakeStore implements DeleteSyncStore {
-  list: Entry[] = [];
-  file: string | null = null;
-  book: DeletionBook = EMPTY_BOOK;
-
-  userId(): string | null {
-    return fakeAuth.user;
-  }
-  pending(): PendingDeletes {
-    return stateOf(this.book, fakeAuth.user);
-  }
-  setPending(next: PendingDeletes): void {
-    this.book = withState(this.book, next);
-    this.file = serializeDeletionBook(this.book);
-  }
-  entries(): Entry[] {
-    return this.list;
-  }
-  removeLocal(gone: Entry[]): void {
-    const ids = new Set(gone.map((e) => e.id));
-    this.list = this.list.filter((e) => !ids.has(e.id));
-  }
-  // What entries-store does when Wispra starts: read the file as it is
-  restart(): void {
-    this.book = parseDeletionBook(this.file);
-  }
-}
 
 const realCloud: DeleteSyncCloud = { deleteOne: deleteHistoryEntry, deleteAll: deleteAllHistory, read: (since, asUser) => readHistory(since, asUser) };
 

@@ -3,17 +3,14 @@ import { Alert, AppState } from 'react-native';
 
 import { AiError } from './ai';
 import {
-  choiceText,
-  leaveForNewAccount,
-  mergeIntoNewAccount,
-  needsChoice,
+  applyAccountChoice,
+  choiceView,
   ownerAfterSignIn,
-  phoneData,
   syncAllowed,
   type AccountChoice,
-  type ChoiceText,
+  type AccountChoiceView,
+  type ChoiceResult,
   type DataOwner,
-  type PhoneData,
 } from './account-switch';
 import { currentSession, subscribe as onSignInChange } from './cloud-auth';
 import { File } from 'expo-file-system';
@@ -91,19 +88,15 @@ interface EntriesApi {
   ask(id: string, question: string): Promise<void>;
   // Signed in with another account than the one whose data is on this phone: what the user must
   // choose before anything is synced (null when there is nothing to choose)
-  accountChoice: PendingAccountChoice | null;
-  chooseAccount(choice: AccountChoice): void;
+  accountChoice: AccountChoiceView | null;
+  // Applies the choice to exactly the entries the question showed (shownIds); see ChoiceResult
+  chooseAccount(choice: AccountChoice, shownIds: readonly string[]): ChoiceResult;
 }
 
 export interface SyncState {
   at: string | null;
   note: string | null;
   waitingDeletes: number;
-}
-
-export interface PendingAccountChoice {
-  data: PhoneData;
-  text: ChoiceText;
 }
 
 const EntriesContext = createContext<EntriesApi | null>(null);
@@ -149,7 +142,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   const deletionBook = useRef<DeletionBook>(EMPTY_BOOK);
   // The account the data on this phone belongs to (account.json, see account-switch.ts)
   const dataOwner = useRef<DataOwner | null>(null);
-  const [accountChoice, setAccountChoice] = useState<PendingAccountChoice | null>(null);
+  const [accountChoice, setAccountChoice] = useState<AccountChoiceView | null>(null);
   const myDeletes = useCallback((): PendingDeletes => stateOf(deletionBook.current, currentSession()?.userId ?? null), []);
   // When the history was last shared with Wispra Cloud, and why it was not, if it was not
   const [syncState, setSyncState] = useState<SyncState>({ at: null, note: null, waitingDeletes: 0 });
@@ -555,6 +548,11 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     async (id: string) => {
       const entry = current.current.find((e) => e.id === id);
       if (!entry) return;
+      // Another account signed in and the user has not chosen yet: nothing goes to Wispra Cloud
+      if (!syncAllowed(dataOwner.current, currentSession()) && transcriptionAvailable()) {
+        update(id, { error: 'Choose how to use the account you signed in with first. The audio is kept on this phone.' });
+        return;
+      }
       if (entry.segments) {
         // Pieces that failed wait again; the meeting is finished again once they are done
         commit(
@@ -657,9 +655,9 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   const checkAccount = useCallback(() => {
     if (readFailed.current) return;
     const session = currentSession();
-    if (needsChoice(dataOwner.current, session) && session && dataOwner.current) {
-      const data = phoneData(current.current);
-      setAccountChoice({ data, text: choiceText(dataOwner.current, session, data) });
+    const view = choiceView(dataOwner.current, session, current.current);
+    if (view) {
+      setAccountChoice(view);
       return;
     }
     setAccountChoice(null);
@@ -668,35 +666,46 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   }, [saveOwner]);
 
   const chooseAccount = useCallback(
-    (choice: AccountChoice) => {
-      const session = currentSession();
-      if (!session || !needsChoice(dataOwner.current, session)) {
-        checkAccount();
-        return;
-      }
-      if (choice === 'merge') {
-        // The phone's entries now belong to the new account and are shared with it
-        commit(mergeIntoNewAccount(current.current));
-      } else {
-        // Removed from this phone only: no deletion is sent to the previous account's Wispra Cloud
-        const { keep, removed } = leaveForNewAccount(current.current);
-        for (const e of removed) {
-          for (const uri of [e.audioUri, ...(e.segments ?? []).map((seg) => seg.uri)]) {
+    (choice: AccountChoice, shownIds: readonly string[]): ChoiceResult => {
+      if (readFailed.current) return 'save-failed';
+      const result = applyAccountChoice(
+        {
+          session: currentSession,
+          owner: () => dataOwner.current,
+          entries: () => current.current,
+          saveEntries: commit,
+          deleteAudio: (uri) => {
             try {
               deleteAudio(uri);
             } catch {
-              // The entry goes even if a file is already gone
+              // The entry is gone from the list either way
             }
-          }
-        }
-        commit(keep);
+          },
+          saveOwner,
+          resetReadCursor: (userId) => setPendingDeletes({ ...stateOf(deletionBook.current, userId), since: null }),
+        },
+        choice,
+        shownIds,
+      );
+      if (result === 'done') {
+        setAccountChoice(null);
+        void transcribeWaiting();
+      } else {
+        // The question shows the entries as they are now (or goes away when nothing is to choose)
+        checkAccount();
       }
-      saveOwner({ userId: session.userId, email: session.email });
-      setAccountChoice(null);
-      void transcribeWaiting();
+      return result;
     },
-    [checkAccount, commit, saveOwner, transcribeWaiting],
+    [checkAccount, commit, saveOwner, setPendingDeletes, transcribeWaiting],
   );
+
+  // While the question waits, it follows the entries (a dictation from the mic button, a recording
+  // that ended), so the numbers it shows are always the ones a choice applies to
+  useEffect(() => {
+    if (accountChoice) checkAccount();
+    // Only when the entries change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries]);
 
   useEffect(() => {
     if (!loaded) return;
