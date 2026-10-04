@@ -1,0 +1,98 @@
+# iOS builds run on Codemagic because there is no Mac on the development machine.
+# Both workflows start only when someone presses "Start new build" in Codemagic (no
+# `triggering:` block), so pushes never use build minutes on their own.
+#
+# The app is an Expo project: `expo prebuild` generates the ios/ folder from app.json on the
+# build machine (it is not committed), then CocoaPods and Xcode build it.
+
+workflows:
+  # Checks that the app compiles for iOS. Nothing is signed or sent to Apple.
+  ios-unsigned:
+    name: iOS Unsigned Build
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      node: 22
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install JavaScript dependencies
+        script: npm ci
+      - name: Run the tests
+        script: npm test -- --ci
+      - name: Generate the iOS project
+        script: npx expo prebuild --platform ios --no-install
+      - name: Install CocoaPods
+        script: cd ios && pod install
+      - name: Build for a device without signing
+        script: |
+          xcodebuild -workspace ios/Wispra.xcworkspace -scheme Wispra \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO build | xcpretty
+    artifacts:
+      - /tmp/xcodebuild_logs/*.log
+
+  # Signed build, uploaded to App Store Connect so it appears in TestFlight for internal
+  # testers. It is never sent to App Review or to external beta review: those stay manual steps
+  # in App Store Connect, done by the owner.
+  ios-testflight:
+    name: iOS TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      # The App Store Connect API key added in Codemagic for Lenvid; one key serves every app of
+      # the same Apple team. The key itself is never in this file.
+      app_store_connect: lenvid-asc
+    environment:
+      node: 22
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        # Codemagic fetches or creates the Apple Distribution certificate and the App Store
+        # profile for this bundle id (Team settings > Code signing identities).
+        distribution_type: app_store
+        bundle_identifier: com.sinhgiang.wispramobile
+      vars:
+        # The app's numeric Apple ID, shown in App Store Connect under App Information once the
+        # owner has created the app. Empty until then; the build stops with a clear message.
+        APP_STORE_APPLE_ID: ""
+    scripts:
+      - name: Check the App Store Connect app
+        script: |
+          #!/bin/bash
+          if [ -z "$APP_STORE_APPLE_ID" ]; then
+            echo "APP_STORE_APPLE_ID is empty in codemagic.yaml: create the app in App Store Connect first,"
+            echo "then put its Apple ID (a number) in the ios-testflight workflow."
+            exit 1
+          fi
+      - name: Install JavaScript dependencies
+        script: npm ci
+      - name: Run the tests
+        script: npm test -- --ci
+      - name: Generate the iOS project
+        script: npx expo prebuild --platform ios --no-install
+      - name: Install CocoaPods
+        script: cd ios && pod install
+      - name: Apply signing profiles to the Xcode project
+        script: xcode-project use-profiles
+      - name: Set the build number
+        script: |
+          #!/bin/bash
+          # App Store Connect refuses a build number it has already seen: take the newest one on
+          # TestFlight and add one (1 before the first upload).
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          case "$LATEST" in ''|*[!0-9]*) LATEST=0 ;; esac
+          BUILD_NUMBER=$((LATEST + 1))
+          echo "Latest build number on TestFlight: $LATEST. This build: $BUILD_NUMBER."
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" ios/Wispra/Info.plist
+      - name: Build a signed .ipa
+        script: |
+          xcode-project build-ipa --workspace ios/Wispra.xcworkspace --scheme Wispra
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false
