@@ -25,10 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Expo SDK 57 needs Swift 6.2 (Xcode 26); the runner's default Xcode is older
+      # Expo SDK 57 needs Swift 6.2 (Xcode 26). Xcode 26.3 rejects a header of expo-modules-jsi
+      # (SWIFT_RETURNS_RETAINED on RuntimeScheduler), so an earlier Xcode 26 is used
       - uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: '26.1'
 
       - uses: actions/setup-node@v4
         with:
