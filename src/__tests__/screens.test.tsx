@@ -11,6 +11,9 @@ import type { SetupState } from '@/lib/setup-guide';
 const mockPush = jest.fn();
 let mockSetup: SetupState;
 const mockSaveMinutes = jest.fn();
+let mockSavedLanguage = 'vi';
+const mockLanguageSaves: string[] = [];
+const mockNativeLanguage: string[] = [];
 const mockStartSession = jest.fn(async (minutes: number) => ({ active: true, until: Date.now() + minutes * 60_000, listening: false }));
 
 jest.mock('react-native-safe-area-context', () => (jest.requireActual('react-native-safe-area-context/jest/mock') as { default: object }).default);
@@ -23,7 +26,17 @@ jest.mock('@/lib/use-recording', () => ({
 jest.mock('@/lib/entries-store', () => ({
   useEntries: () => ({ entries: [], syncState: { note: null, at: null, waitingDeletes: 0 }, retry: jest.fn(), busy: new Set(), cloudAllowed: () => true }),
 }));
-jest.mock('@/lib/storage', () => ({ loadSessionMinutes: () => 60, saveSessionMinutes: (m: number) => mockSaveMinutes(m), audioExists: () => true }));
+jest.mock('@/lib/storage', () => ({
+  loadSessionMinutes: () => 60,
+  saveSessionMinutes: (m: number) => mockSaveMinutes(m),
+  audioExists: () => true,
+  loadTranscribeLanguage: () => mockSavedLanguage,
+  saveTranscribeLanguage: (l: string) => {
+    mockSavedLanguage = l;
+    mockLanguageSaves.push(l);
+  },
+}));
+jest.mock('@/modules/wispra-dictation', () => ({ setTranscribeLanguage: (l: string) => mockNativeLanguage.push(l) }));
 jest.mock('expo-audio', () => ({ useAudioPlayer: () => ({}), useAudioPlayerStatus: () => ({}) }));
 jest.mock('@/modules/wispra-keyboard-bridge', () => ({
   startSession: (m: number) => mockStartSession(m),
@@ -51,6 +64,9 @@ const android: SetupState = { platform: 'android', signedIn: true, keyboard: nul
 beforeEach(() => {
   mockPush.mockClear();
   mockSaveMinutes.mockClear();
+  mockSavedLanguage = 'vi';
+  mockLanguageSaves.length = 0;
+  mockNativeLanguage.length = 0;
   mockStartSession.mockClear();
   mockSetup = iphone;
 });
@@ -183,5 +199,35 @@ describe('the tab row of a meeting (T-0164 review, point 6)', () => {
     expect(row).toMatchObject({ flexGrow: 0, flexShrink: 0, minHeight: 48, backgroundColor: '#0f1117', borderBottomWidth: 1 });
     // The same component is in the meeting being recorded and in a finished one
     for (const label of ['Summary', 'Transcript', 'Mind map', 'Post']) expect(screen.getByText(label)).toBeTruthy();
+  });
+});
+
+describe('Account › Transcription language (T-0145, W-0311)', () => {
+  it('says Vietnamese until another is chosen, and offers Vietnamese, Auto-detect and English', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    await render(<AccountScreen />);
+    expect(screen.getByText('Transcription')).toBeTruthy();
+    expect(screen.getByText('Vietnamese')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Language'));
+    const buttons = (alert.mock.calls[0]?.[2] ?? []) as { text?: string }[];
+    expect(buttons.map((b) => b.text)).toEqual(['Vietnamese ✓', 'Auto-detect', 'English', 'Cancel']);
+  });
+
+  it('keeps the choice and tells the Android keyboard and mic button', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    await render(<AccountScreen />);
+    await fireEvent.press(screen.getByText('Language'));
+    const buttons = (alert.mock.calls[0]?.[2] ?? []) as { text?: string; onPress?: () => void }[];
+    await act(async () => buttons[1].onPress?.());
+    expect(mockLanguageSaves).toEqual(['auto']);
+    // The app start told it too (the first entry), then the choice
+    expect(mockNativeLanguage[mockNativeLanguage.length - 1]).toBe('auto');
+    expect(await screen.findByText('Auto-detect')).toBeTruthy();
+  });
+
+  it('is on Android too: the same row', async () => {
+    mockSetup = android;
+    await render(<AccountScreen />);
+    expect(screen.getByText('Language')).toBeTruthy();
   });
 });

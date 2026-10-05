@@ -62,6 +62,11 @@ class WispraDictationModule : Module() {
       CloudSession.setConfig(context, apiBase, supabaseUrl, publishableKey)
     }
 
+    // The language chosen in Account, for the keyboard and the mic button (TranscribeLanguage)
+    Function("setTranscribeLanguage") { language: String ->
+      CloudSession.setLanguage(context, TranscribeLanguage.parse(language))
+    }
+
     // Cuts a recording into pieces of pieceMs (no re-encoding). The pieces are written next to
     // it; the original is left in place for the caller to remove once the pieces are saved.
     AsyncFunction("splitAudio") { uri: String, pieceMs: Double ->

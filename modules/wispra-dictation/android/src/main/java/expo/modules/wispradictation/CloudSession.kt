@@ -14,6 +14,7 @@ object CloudSession {
   private const val FILE = "wispra_cloud"
   private const val SESSION = "session"
   private const val API_BASE = "apiBase"
+  private const val LANGUAGE = "transcribeLanguage"
   private const val SUPABASE_URL = "supabaseUrl"
   private const val PUBLISHABLE_KEY = "publishableKey"
   private const val REFRESH_MARGIN_MS = 5 * 60 * 1000L
@@ -36,6 +37,13 @@ object CloudSession {
   }
 
   fun apiBase(context: Context): String? = prefs(context).getString(API_BASE, null)
+
+  /** The language chosen in Account ("vi", "auto" or "en"); null until the app has told us */
+  fun language(context: Context): String? = prefs(context).getString(LANGUAGE, null)
+
+  fun setLanguage(context: Context, language: String) {
+    prefs(context).edit().putString(LANGUAGE, language).commit()
+  }
 
   /** A token for Wispra Cloud, refreshed when it is about to run out; null when signed out. */
   @Synchronized

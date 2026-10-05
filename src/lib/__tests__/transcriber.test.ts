@@ -236,3 +236,29 @@ describe('what each path does with a piece of silence (T-0164 review 2)', () => 
     expect(wordsFrom(silence)).toBe('');
   });
 });
+
+describe('the language chosen in Account goes to Whisper (T-0145, W-0311)', () => {
+  const answerOnce = JSON.stringify({ segments: [{ text: ' Xin chào cả nhà', no_speech_prob: 0.01, avg_logprob: -0.2, start: 0, end: 3 }] });
+
+  it('sends Vietnamese or English as the language field, and nothing for Auto-detect', async () => {
+    for (const [language, expected] of [['vi', 'vi'], ['en', 'en'], [undefined, undefined]] as const) {
+      const { file, calls } = audio({ reply: async () => ({ status: 200, body: answerOnce, headers: {} }) });
+      await transcribeFile(file, 3_000, token, { language });
+      const parameters = calls[0].options?.parameters ?? {};
+      if (expected) expect(parameters).toMatchObject({ language: expected });
+      else expect(parameters).not.toHaveProperty('language');
+    }
+  });
+
+  it('with a language chosen, a piece that lost speech is not sent again (the language was already told)', async () => {
+    const garbled = JSON.stringify({ segments: [{ text: ' B ph tr s vi c tr l m c n g ch th nh t', no_speech_prob: 0.01, avg_logprob: -0.07, start: 0, end: 12 }] });
+    const chosen = audio({ reply: async () => ({ status: 200, body: garbled, headers: {} }) });
+    await transcribeFile(chosen.file, 12_000, token, { language: 'vi' });
+    expect(chosen.calls).toHaveLength(1);
+    // Auto-detect: the resend asking for Vietnamese is still there
+    const auto = audio({ reply: async () => ({ status: 200, body: garbled, headers: {} }) });
+    await transcribeFile(auto.file, 12_000, token, { language: undefined });
+    expect(auto.calls).toHaveLength(2);
+    expect(auto.calls[1].options?.parameters).toMatchObject({ language: 'vi' });
+  });
+});

@@ -13,8 +13,9 @@ import java.util.UUID
  * (signed out, offline, limit reached), and when nothing was said or the words could not be made
  * out; the dictation then waits in History with its audio, and the app transcribes it later.
  *
- * Real speech lost to the bare-consonant filter is sent again once, asking for Vietnamese, as in
- * the app (T-0164 review 2); the resend does not count the minutes a second time.
+ * The language is the one chosen in Account (Vietnamese until chosen). Without one ("auto"), real
+ * speech lost to the bare-consonant filter is sent again once, asking for Vietnamese, as in the app
+ * (T-0164 review 2); the resend does not count the minutes a second time.
  */
 class CloudTranscriber(private val context: Context) : Transcriber {
   override fun transcribe(audio: File, durationMs: Long): String? {
@@ -22,8 +23,12 @@ class CloudTranscriber(private val context: Context) : Transcriber {
     val apiBase = CloudSession.apiBase(context) ?: return null
     val token = CloudSession.validToken(context) ?: return null
 
-    val first = send(audio, durationMs, apiBase, token, language = null, countMinutes = true) ?: return null
-    val chosen = TranscriptFilter.resolve(answerOf(first)) {
+    // The language chosen in Account ("auto": none is sent, Whisper guesses)
+    val language = TranscribeLanguage.whisperCode(CloudSession.language(context))
+    val first = send(audio, durationMs, apiBase, token, language = language, countMinutes = true) ?: return null
+    // With a language already sent there is nothing more to ask; with none, a piece that lost real
+    // speech is sent again asking for Vietnamese
+    val chosen = if (language != null) answerOf(first) else TranscriptFilter.resolve(answerOf(first)) {
       send(audio, durationMs, apiBase, token, language = "vi", countMinutes = false)?.let { answerOf(it) }
     }
     return chosen.text.ifEmpty { null }

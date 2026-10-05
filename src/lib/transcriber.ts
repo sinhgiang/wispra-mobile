@@ -3,7 +3,9 @@ import { File, UploadType, type UploadOptions, type UploadResult } from 'expo-fi
 import { currentSession, validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
 import type { Entry } from './entries';
+import { loadTranscribeLanguage } from './storage';
 import { emptyAudio, NO_AUDIO, NO_SPEECH } from './transcribe-queue';
+import { withChosenLanguage } from './transcribe-language';
 import { readAnswer, type ReadAnswer, type VerboseTranscript } from './transcript-filter';
 
 // transient: nothing is wrong with the recording (offline, signed out, server busy), so it can
@@ -21,9 +23,9 @@ export function transcriptionAvailable(): boolean {
   return currentSession() !== null;
 }
 
-// What a piece of audio is told to Whisper. The computer sends the language only when the user chose
-// one; here it is left out (Whisper guesses) unless given, and a resend of an answer that lost real
-// speech asks for Vietnamese (see needsResend).
+// What a piece of audio is told to Whisper: the language chosen in Account, as on the computer, left
+// out for "auto" (Whisper guesses). With none, a resend of an answer that lost real speech asks for
+// Vietnamese (see needsResend); with one already sent, there is nothing more to ask.
 export interface TranscribeOptions {
   language?: string;
 }
@@ -110,9 +112,11 @@ export async function transcribe(entry: Entry, options: TranscribeOptions = {}):
 }
 
 // One audio file: a dictation, a meeting recorded before part 3, or one piece of a meeting
+// The language is the one chosen in Account (Vietnamese until chosen; "auto" sends none), unless the
+// caller says one (an explicit `language` key, even undefined).
 export async function transcribeAudio(uri: string | null, durationMs: number, options: TranscribeOptions = {}): Promise<TranscribeResult> {
   if (!uri) return { ok: false, error: 'The audio file is not on this phone.' };
-  return transcribeFile(new File(uri), durationMs, validToken, options);
+  return transcribeFile(new File(uri), durationMs, validToken, withChosenLanguage(options, loadTranscribeLanguage()));
 }
 
 // The file is sent by the phone's own uploader (URLSession on iPhone, OkHttp on Android), straight

@@ -3,6 +3,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import { entryFromInbox, parseEntries, parseInboxRecord, serializeEntries, type Entry } from './entries';
 import { parseOwner, serializeOwner, type DataOwner } from './account-switch';
 import { parseSessionMinutes } from './keyboard-session';
+import { parseTranscribeLanguage, type TranscribeLanguage } from './transcribe-language';
 import { freeName } from './transcribe-queue';
 import { parseDeletionBook, serializeDeletionBook, type DeletionBook } from './history-delete';
 
@@ -112,6 +113,19 @@ export function markGuideSeen(): void {
   ensureDirs();
   const file = new File(root, 'guide-seen');
   if (!file.exists) file.create();
+}
+
+// The language Whisper is told the speech is in, chosen in Account (Vietnamese until chosen)
+export function loadTranscribeLanguage(): TranscribeLanguage {
+  const file = new File(root, 'transcribe-language');
+  return parseTranscribeLanguage(file.exists ? file.textSync() : null);
+}
+
+export function saveTranscribeLanguage(language: TranscribeLanguage): void {
+  ensureDirs();
+  const file = new File(root, 'transcribe-language');
+  if (!file.exists) file.create();
+  file.write(language);
 }
 
 // How long the keyboard's listening session lasts (iPhone), chosen in Account

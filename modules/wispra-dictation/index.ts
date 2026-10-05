@@ -9,6 +9,7 @@ interface NativeWispraDictation {
   getSession(): string | null;
   setSession(json: string | null): void;
   setCloudConfig(apiBase: string, supabaseUrl: string, publishableKey: string): void;
+  setTranscribeLanguage(language: string): void;
   isKeyboardEnabled(): boolean;
   openKeyboardSettings(): void;
   showKeyboardPicker(): void;
@@ -65,6 +66,12 @@ export const canSplitAudio = native !== null;
 export async function splitAudio(uri: string, pieceMs: number): Promise<{ uri: string; startMs: number; durationMs: number }[]> {
   if (!native) throw new Error('Splitting audio is not available on this phone.');
   return native.splitAudio(uri, pieceMs);
+}
+
+// The language the Android keyboard and the mic button tell Whisper ("vi", "auto" or "en"), the one
+// chosen in Account
+export function setTranscribeLanguage(language: string): void {
+  native?.setTranscribeLanguage(language);
 }
 
 // Where the service sends dictations to be transcribed

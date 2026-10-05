@@ -14,6 +14,8 @@ import { SESSION_CHOICES, sessionLabel } from '@/lib/keyboard-session';
 import { otherAppsRows, type OtherAppsTarget } from '@/lib/setup-guide';
 import { signInWithGoogle } from '@/lib/sign-in';
 import { loadSessionMinutes, saveSessionMinutes } from '@/lib/storage';
+import { TRANSCRIBE_LANGUAGES, transcribeLanguageLabel } from '@/lib/transcribe-language';
+import { chooseTranscribeLanguage, syncTranscribeLanguage } from '@/lib/transcribe-language-store';
 import { useSetupState } from '@/lib/use-setup';
 import { useSession } from '@/lib/use-session';
 
@@ -87,6 +89,8 @@ export default function AccountScreen() {
 
         <OtherApps />
 
+        <TranscriptionLanguage />
+
         <View style={styles.rows}>
           <Row label="Saved on this phone" value={`${stats.count}`} />
           {session ? (
@@ -151,6 +155,42 @@ function OtherApps() {
         ))}
       </View>
       {rows[0]?.target === 'ios-settings' ? <Text style={styles.hint}>In Settings: Keyboards › Wispra on, and Allow Full Access.</Text> : null}
+    </View>
+  );
+}
+
+// The language Whisper is told the speech is in (T-0145, the owner's choice at W-0311): Vietnamese
+// until chosen, as on the computer; Auto-detect lets Whisper guess; English. Android's keyboard and
+// mic button use it too.
+function TranscriptionLanguage() {
+  const [language, setLanguage] = useState(syncTranscribeLanguage);
+  const choose = () =>
+    Alert.alert(
+      'Transcription language',
+      'The language you speak. Wispra Cloud tells it to Whisper, which is more exact than letting it guess, especially for short or noisy pieces.',
+      [
+        ...TRANSCRIBE_LANGUAGES.map((l) => ({
+          text: l.value === language ? `${l.label} ✓` : l.label,
+          onPress: () => {
+            chooseTranscribeLanguage(l.value);
+            setLanguage(l.value);
+          },
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    );
+  return (
+    <View style={styles.group}>
+      <Text style={styles.groupLabel}>Transcription</Text>
+      <View style={styles.rows}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Transcription language: ${transcribeLanguageLabel(language)}. Change it`} onPress={choose} style={styles.row}>
+          <Text style={styles.rowLabel}>Language</Text>
+          <View style={styles.rowEnd}>
+            <Text style={styles.rowValue}>{transcribeLanguageLabel(language)}</Text>
+            <Text style={styles.chevron}>›</Text>
+          </View>
+        </Pressable>
+      </View>
     </View>
   );
 }

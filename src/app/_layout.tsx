@@ -9,6 +9,7 @@ import { KeyboardSessionBridge } from '@/components/wispra/keyboard-session-brid
 import { EntriesProvider, useEntries } from '@/lib/entries-store';
 import { shouldShowGuide } from '@/lib/setup-guide';
 import { guideSeen, markGuideSeen } from '@/lib/storage';
+import { syncTranscribeLanguage } from '@/lib/transcribe-language-store';
 import { useSetupStateBase } from '@/lib/use-setup';
 
 SplashScreen.preventAutoHideAsync();
@@ -66,6 +67,8 @@ export default function RootLayout() {
   // The Wispra Cloud sign-in kept from last time
   useEffect(() => {
     void loadSession();
+    // The Android keyboard and mic button learn the language chosen in Account
+    syncTranscribeLanguage();
   }, []);
 
   return (
