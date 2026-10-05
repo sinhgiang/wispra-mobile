@@ -10,6 +10,7 @@ import {
   mergeIntoNewAccount,
   needsChoice,
   ownerAfterSignIn,
+  ownerAtStart,
   parseOwner,
   phoneData,
   serializeOwner,
@@ -263,3 +264,82 @@ function bind(store: FakeStore): ChoiceDeps {
     resetReadCursor: (userId) => store.resetReadCursor(userId),
   };
 }
+
+describe('a phone whose data has no known owner (made by an older version)', () => {
+  it('knows the owner at start: account.json, unclaimed, or unknown when there is data but no file', () => {
+    expect(ownerAtStart(anna, annasPhone)).toEqual({ owner: anna, markUnclaimed: false });
+    expect(ownerAtStart('unclaimed', annasPhone)).toEqual({ owner: null, markUnclaimed: false });
+    expect(ownerAtStart(null, annasPhone)).toEqual({ owner: 'unknown', markUnclaimed: false });
+    // A fresh phone: marked unclaimed, so what is recorded before the first sign-in is that account's
+    expect(ownerAtStart(null, [])).toEqual({ owner: null, markUnclaimed: true });
+    // Only a recording in progress counts as no data yet
+    expect(ownerAtStart(null, [annasPhone[4]]).owner).toBeNull();
+  });
+
+  it('keeps unclaimed in account.json', () => {
+    expect(parseOwner(serializeOwner('unclaimed'))).toBe('unclaimed');
+  });
+
+  it('asks on any sign-in, syncs nothing before the choice, and does not take the account by itself', () => {
+    expect(needsChoice('unknown', ben)).toBe(true);
+    expect(syncAllowed('unknown', ben)).toBe(false);
+    expect(ownerAfterSignIn('unknown', ben)).toBe('unknown');
+    expect(needsChoice('unknown', null)).toBe(false);
+  });
+
+  it('says the data comes from an earlier account it cannot name', () => {
+    const t = choiceText('unknown', ben, phoneData(annasPhone));
+    expect(t.intro).toContain('from an earlier account (this phone did not keep which one)');
+    expect(t.newOnly.detail).toContain('Nothing is deleted in the Wispra Cloud of an earlier account');
+  });
+
+  it('applies either choice through applyAccountChoice, then the account signed in owns the data', () => {
+    const store = new FakeStore();
+    store.list = annasPhone;
+    store.dataOwner = 'unknown';
+    fakeAuth.user = 'user-b';
+    const shown = choiceView(store.owner(), store.session(), store.entries())!.shownIds;
+    expect(applyAccountChoice(bind(store), 'merge', shown)).toBe('done');
+    expect(store.dataOwner).toEqual({ userId: 'user-b', email: 'user-b@example.com' });
+    expect(store.list).toHaveLength(5);
+    fakeAuth.user = null;
+  });
+});
+
+describe('Sign out from the question (a sign-in with the wrong account)', () => {
+  let server: FakeCloud;
+  const realFetch = global.fetch;
+
+  beforeEach(() => {
+    server = new FakeCloud();
+    global.fetch = server.fetch as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = realFetch;
+    fakeAuth.user = null;
+  });
+
+  it('is offered by the question, and is not a choice about the data', () => {
+    const t = choiceText(anna, ben, phoneData(annasPhone));
+    expect(t.signOut.label).toBe('Sign out');
+    expect(t.signOut.detail).toBe('Signed in with the wrong account? Sign out: nothing is synced and nothing changes on this phone.');
+  });
+
+  it('after signing out: no question, nothing synced or changed, the data still belongs to Anna', async () => {
+    const store = new FakeStore();
+    store.list = annasPhone;
+    store.dataOwner = anna;
+    fakeAuth.user = 'user-b';
+    const shown = choiceView(store.owner(), store.session(), store.entries())!.shownIds;
+    fakeAuth.user = null; // Sign out
+    expect(choiceView(store.owner(), store.session(), store.entries())).toBeNull();
+    expect(applyAccountChoice(bind(store), 'new-only', shown)).toBe('not-needed');
+    expect(syncAllowed(store.owner(), store.session())).toBe(false);
+    expect(await syncDeletes(store, realCloud, () => new Date())).toBeNull();
+    expect(server.requests).toEqual([]);
+    expect(store.log).toEqual([]);
+    expect(store.dataOwner).toBe(anna);
+    expect(store.list).toHaveLength(5);
+  });
+});

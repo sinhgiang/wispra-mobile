@@ -7,10 +7,12 @@ import {
   choiceView,
   ownerAfterSignIn,
   syncAllowed,
+  ownerAtStart,
   type AccountChoice,
   type AccountChoiceView,
   type ChoiceResult,
   type DataOwner,
+  type Owner,
 } from './account-switch';
 import { currentSession, subscribe as onSignInChange } from './cloud-auth';
 import { File } from 'expo-file-system';
@@ -141,7 +143,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   // at start; the account signed in is looked up at each use, never when the file is read.
   const deletionBook = useRef<DeletionBook>(EMPTY_BOOK);
   // The account the data on this phone belongs to (account.json, see account-switch.ts)
-  const dataOwner = useRef<DataOwner | null>(null);
+  const dataOwner = useRef<Owner>(null);
   const [accountChoice, setAccountChoice] = useState<AccountChoiceView | null>(null);
   const myDeletes = useCallback((): PendingDeletes => stateOf(deletionBook.current, currentSession()?.userId ?? null), []);
   // When the history was last shared with Wispra Cloud, and why it was not, if it was not
@@ -206,9 +208,16 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       deletionBook.current = EMPTY_BOOK;
     }
     try {
-      dataOwner.current = loadDataOwner();
+      if (readFailed.current) {
+        // The entries could not be read: whose they are cannot be told either, so a sign-in asks
+        dataOwner.current = 'unknown';
+      } else {
+        const { owner, markUnclaimed } = ownerAtStart(loadDataOwner(), list);
+        dataOwner.current = owner;
+        if (markUnclaimed) saveDataOwner('unclaimed');
+      }
     } catch {
-      dataOwner.current = null;
+      dataOwner.current = 'unknown';
     }
     setSyncState((prev) => ({ ...prev, waitingDeletes: myDeletes().ids.length }));
     current.current = list;
@@ -661,8 +670,9 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       return;
     }
     setAccountChoice(null);
-    const next = ownerAfterSignIn(dataOwner.current, session);
-    if (next && (next.userId !== dataOwner.current?.userId || next.email !== dataOwner.current?.email)) saveOwner(next);
+    const before = dataOwner.current;
+    const next = ownerAfterSignIn(before, session);
+    if (next && next !== 'unknown' && (before === null || before === 'unknown' || next.userId !== before.userId || next.email !== before.email)) saveOwner(next);
   }, [saveOwner]);
 
   const chooseAccount = useCallback(

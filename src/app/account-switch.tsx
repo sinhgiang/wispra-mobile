@@ -3,9 +3,10 @@ import { useEffect } from 'react';
 import { Alert, BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Body, ui } from '@/components/wispra/ui';
+import { Body, Button, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import type { AccountChoice } from '@/lib/account-switch';
+import { signOut } from '@/lib/cloud-auth';
 import { useEntries } from '@/lib/entries-store';
 
 // Shown when another account signs in than the one whose data is on this phone (T-0142). It cannot
@@ -64,6 +65,10 @@ export default function AccountSwitchScreen() {
         <Body style={styles.intro}>{text.intro}</Body>
         <Option label={text.merge.label} detail={text.merge.detail} onPress={() => choose('merge')} />
         <Option label={text.newOnly.label} detail={text.newOnly.detail} onPress={() => choose('new-only')} />
+        <View style={styles.way}>
+          <Body style={styles.wayText}>{text.signOut.detail}</Body>
+          <Button label={text.signOut.label} onPress={() => void signOut()} />
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -87,4 +92,6 @@ const styles = StyleSheet.create({
   option: { padding: 16, borderRadius: 14, borderWidth: 1, borderColor: W.lineStrong, backgroundColor: W.surface, gap: 6 },
   optionLabel: { color: W.text, fontSize: 16, fontWeight: '700' },
   optionDetail: { color: W.muted, fontSize: 13, lineHeight: 19 },
+  way: { gap: Gap.s, marginTop: Gap.s },
+  wayText: { color: W.muted, fontSize: 13, lineHeight: 19 },
 });
