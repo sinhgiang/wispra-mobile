@@ -22,12 +22,53 @@ enum SharedChannel {
     case session, chunks, seen
   }
 
-  /// <team>.com.sinhgiang.wispramobile.shared; nil when the build has no team (unsigned builds and
-  /// tests), which uses the default access group
+  /// <team>.com.sinhgiang.wispramobile.shared. The team prefix comes from Info.plist
+  /// ("AppIdentifierPrefix", filled in at build time); if that is missing it is read from the keychain
+  /// itself, so the app and the keyboard never end up writing and reading in two different default
+  /// groups without a sign (T-0163 review). nil only when no team can be found at all.
   static var accessGroup: String? {
-    guard let prefix = Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as? String,
-          !prefix.isEmpty, !prefix.contains("$") else { return nil }
-    return prefix + groupSuffix
+    if let prefix = teamPrefix { return prefix + groupSuffix }
+    return nil
+  }
+
+  private static var cachedPrefix: String??
+
+  /// "AY64ZULZ5R." (with the dot)
+  static var teamPrefix: String? {
+    if let cached = cachedPrefix { return cached }
+    var prefix: String?
+    if let plist = Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as? String, !plist.isEmpty, !plist.contains("$") {
+      prefix = plist
+    } else {
+      prefix = prefixFromKeychain()
+    }
+    cachedPrefix = .some(prefix)
+    return prefix
+  }
+
+  /// The team prefix of the access group the keychain gives an item saved without one (the first
+  /// group of the entitlement: "<team>.<bundle id>" for the app, "<team>.com.sinhgiang…shared" for
+  /// the keyboard)
+  static func prefixFromKeychain() -> String? {
+    let probe: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: service + ".probe",
+      kSecAttrAccount as String: "probe",
+    ]
+    var add = probe
+    add[kSecValueData as String] = Data("1".utf8)
+    add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+    let added = SecItemAdd(add as CFDictionary, nil)
+    guard added == errSecSuccess || added == errSecDuplicateItem else { return nil }
+    var read = probe
+    read[kSecReturnAttributes as String] = true
+    read[kSecMatchLimit as String] = kSecMatchLimitOne
+    var result: CFTypeRef?
+    guard SecItemCopyMatching(read as CFDictionary, &result) == errSecSuccess,
+          let attributes = result as? [String: Any],
+          let group = attributes[kSecAttrAccessGroup as String] as? String,
+          let dot = group.firstIndex(of: ".") else { return nil }
+    return String(group[...dot])
   }
 
   private static func query(_ key: Key) -> [String: Any] {

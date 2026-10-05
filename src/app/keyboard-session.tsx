@@ -67,6 +67,8 @@ export default function KeyboardSessionScreen() {
         <Text style={styles.backArrow}>↖</Text>
         <Text style={styles.backText}>{active ? 'Tap ◀ up here to go back to your app' : 'Starting…'}</Text>
       </View>
+      {/* iOS does not always show ◀ (it depends on how Wispra was opened): the other way back */}
+      {active ? <Text style={styles.backAlt}>No ◀? Swipe right along the bottom edge of the screen to go back to the app before.</Text> : null}
 
       <View style={styles.centre}>
         <View style={[styles.ring, active && styles.ringOn]}>
@@ -103,6 +105,7 @@ const styles = StyleSheet.create({
   back: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', backgroundColor: W.accentDeep, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
   backArrow: { color: W.text, fontSize: 22, fontWeight: '700' },
   backText: { color: W.text, fontSize: 15, fontWeight: '600' },
+  backAlt: { color: W.muted, fontSize: 13, lineHeight: 18 },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Gap.l },
   ring: { width: 120, height: 120, borderRadius: 60, backgroundColor: W.surfaceRaised, alignItems: 'center', justifyContent: 'center' },
   ringOn: { backgroundColor: W.accentDeep },

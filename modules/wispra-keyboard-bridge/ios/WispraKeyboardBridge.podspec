@@ -2,7 +2,7 @@ Pod::Spec.new do |s|
   s.name           = 'WispraKeyboardBridge'
   s.version        = '1.0.0'
   s.summary        = 'Hands dictated words from the Wispra app to the Wispra keyboard on iPhone'
-  s.description    = 'Writes the words to a named pasteboard that the Wispra keyboard extension reads.'
+  s.description    = 'Runs the listening session and hands the words to the Wispra keyboard extension through a shared keychain group.'
   s.license        = 'MIT'
   s.author         = 'Wispra'
   s.homepage       = 'https://github.com/sinhgiang/wispra-mobile'

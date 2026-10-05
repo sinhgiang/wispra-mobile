@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
 import { useEntries } from '@/lib/entries-store';
-import { actionFor, wordsFrom } from '@/lib/keyboard-session';
+import { actionFor, pieceFailed, wordsFrom } from '@/lib/keyboard-session';
 import { transcribeAudio } from '@/lib/transcriber';
 import { deliverText, onSessionChunk, type SessionChunk } from '@/modules/wispra-keyboard-bridge';
 
@@ -28,12 +28,18 @@ export function KeyboardSessionBridge() {
 async function handle(chunk: SessionChunk, cloudAllowed: () => boolean): Promise<void> {
   const action = actionFor(chunk, cloudAllowed());
   let words = '';
+  let failed = false;
   try {
-    if (action.kind === 'transcribe') words = wordsFrom(await transcribeAudio(chunk.path, chunk.durationMs));
+    if (action.kind === 'transcribe') {
+      const result = await transcribeAudio(chunk.path, chunk.durationMs);
+      words = wordsFrom(result);
+      failed = pieceFailed(result);
+    }
   } catch {
     words = '';
+    failed = true;
   }
-  await deliverText(chunk.utterance, chunk.index, words, chunk.last);
+  await deliverText(chunk.utterance, chunk.index, words, chunk.last, failed);
   // The audio of a piece is not kept: the words are in the field the user typed into
   try {
     const file = new File(chunk.path);

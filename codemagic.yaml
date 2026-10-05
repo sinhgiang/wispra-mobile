@@ -183,6 +183,31 @@ workflows:
       - name: Build a signed .ipa
         script: |
           xcode-project build-ipa --workspace ios/Wispra.xcworkspace --scheme Wispra
+      # The app and the keyboard pass the words through one keychain group (T-0163,
+      # SharedChannel.swift). In the signed .ipa: both Info.plists have the team prefix filled in, and
+      # both signatures carry the shared group. Otherwise the build stops here, before TestFlight,
+      # instead of the keyboard silently waiting for words in another group.
+      - name: Check the keychain group the app and the keyboard share
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          IPA=$(ls build/ios/ipa/*.ipa | head -n 1)
+          OUT=$(mktemp -d)
+          unzip -q "$IPA" -d "$OUT"
+          APP=$(ls -d "$OUT"/Payload/*.app | head -n 1)
+          for BUNDLE in "$APP" "$APP/PlugIns/WispraKeyboard.appex"; do
+            NAME=$(basename "$BUNDLE")
+            PREFIX=$(plutil -extract AppIdentifierPrefix raw -o - "$BUNDLE/Info.plist" || true)
+            echo "$NAME: AppIdentifierPrefix=$PREFIX"
+            case "$PREFIX" in
+              ""|*'$'*) echo "$NAME: AppIdentifierPrefix was not filled in at build time"; exit 1 ;;
+            esac
+            if ! codesign -d --entitlements - --xml "$BUNDLE" 2>/dev/null | grep -q "${PREFIX}com.sinhgiang.wispramobile.shared"; then
+              echo "$NAME: its signature has no ${PREFIX}com.sinhgiang.wispramobile.shared keychain group"
+              exit 1
+            fi
+            echo "$NAME: shares the keychain group ${PREFIX}com.sinhgiang.wispramobile.shared"
+          done
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log

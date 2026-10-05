@@ -104,6 +104,8 @@ describe('the listening session the keyboard mic opens (T-0163)', () => {
   it('says first how to go back to the app being typed in', async () => {
     await render(<KeyboardSessionScreen />);
     expect(await screen.findByText('Tap ◀ up here to go back to your app')).toBeTruthy();
+    // iOS does not always show ◀: the other way back is there too (T-0163 review)
+    expect(screen.getByText(/Swipe right along the bottom edge/)).toBeTruthy();
     expect(screen.getByText(/change it in Account/)).toBeTruthy();
   });
 

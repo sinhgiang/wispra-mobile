@@ -38,7 +38,7 @@ interface NativeKeyboardBridge {
   startSession(minutes: number): Promise<SessionState>;
   endSession(): Promise<SessionState>;
   sessionState(): Promise<SessionState>;
-  deliverText(utterance: string, index: number, text: string, last: boolean): Promise<boolean>;
+  deliverText(utterance: string, index: number, text: string, last: boolean, failed: boolean): Promise<boolean>;
   addListener(event: 'onChunk', listener: (chunk: SessionChunk) => void): Subscription;
   addListener(event: 'onSession', listener: (state: SessionState) => void): Subscription;
 }
@@ -91,8 +91,9 @@ export async function sessionState(): Promise<SessionState> {
 }
 
 // A transcribed piece for the keyboard, typed at the cursor in order
-export async function deliverText(utterance: string, index: number, text: string, last: boolean): Promise<boolean> {
-  return native ? native.deliverText(utterance, index, text, last) : false;
+// failed: the piece could not be transcribed (the keyboard says so, instead of "not heard")
+export async function deliverText(utterance: string, index: number, text: string, last: boolean, failed = false): Promise<boolean> {
+  return native ? native.deliverText(utterance, index, text, last, failed) : false;
 }
 
 export function onSessionChunk(listener: (chunk: SessionChunk) => void): Subscription | null {

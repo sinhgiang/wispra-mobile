@@ -82,9 +82,9 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     runWithFullAccess(in: host)
   }
 
-  /// The same keyboard as on the owner's iPhone, where "Allow Full Access" is on: it writes the
-  /// pasteboards, reads the listening session, turns the mic red and back, and types the pieces the
-  /// app hands over (named pasteboards and Darwin notifications, as with the real app).
+  /// The same keyboard as on the owner's iPhone, where "Allow Full Access" is on: it notes it was on
+  /// screen, reads the listening session, turns the mic red and back, and types the pieces the app
+  /// hands over (here through the pasteboards of earlier builds; the shared keychain comes next).
   static func runWithFullAccess(in host: UIViewController) {
     let getter = #selector(getter: UIInputViewController.hasFullAccess)
     guard let method = class_getInstanceMethod(UIInputViewController.self, getter) else {
@@ -151,6 +151,8 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
   /// Wispra is in the background, and the keyboard must still see the session and type the words.
   static func runThroughSharedKeychain(in host: UIViewController) {
     check(SharedChannel.accessGroup == "TEST.com.sinhgiang.wispramobile.shared", "the shared keychain group is named from the team prefix")
+    // Without the prefix in Info.plist, the keychain itself gives it (never two default groups)
+    check(SharedChannel.prefixFromKeychain() == "TEST.", "the team prefix can be read from the keychain too")
     let now = Date().timeIntervalSince1970 * 1000
     check(SharedChannel.write(.session, "{\"until\": \(now + 10 * 60 * 1000), \"beat\": \(now)}"), "the app writes the session status to the shared keychain")
     SharedChannel.remove(.chunks)
@@ -179,12 +181,31 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     let mic = buttons(in: keyboard.view).compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == "Speak with Wispra" }
     mic?.sendActions(for: .touchUpInside)
     check(mic?.accessibilityLabel == "Listening. Tap to type what you said", "the session from the shared keychain is live: the mic turns red")
+    // The words of this utterance never come: after the wait the keyboard says so (45 s on the
+    // phone, 1 s here) instead of "Đang viết…" forever
+    KeyboardViewController.wordsWaitSeconds = 1
     mic?.sendActions(for: .touchUpInside)
     check(mic?.accessibilityLabel == "Speak with Wispra", "tapped again: purple, waiting for the words")
+    check(labels(in: keyboard.view).contains("Đang viết…"), "it says the words are being written")
 
-    keyboard.beginAppearanceTransition(false, animated: false)
-    keyboard.endAppearanceTransition()
-    print("KEYBOARD HARNESS OK")
-    exit(0)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+      check(labels(in: keyboard.view).contains("Chưa nhận được chữ. Mở Wispra để xem bản ghi"), "no words after the wait: it says so, not Đang viết… forever")
+
+      // A piece that could not be transcribed is not "not heard"
+      mic?.sendActions(for: .touchUpInside)
+      mic?.sendActions(for: .touchUpInside)
+      check(KeyboardSession.shared.deliver(utterance: "t3", index: 0, text: "", last: true, failed: true), "the app hands over a failed piece")
+      keyboard.typeQueuedPieces()
+      check(labels(in: keyboard.view).contains("Không chép được lời (mạng?). Bản ghi ở trong Wispra"), "a piece that could not be transcribed says so")
+
+      keyboard.beginAppearanceTransition(false, animated: false)
+      keyboard.endAppearanceTransition()
+      print("KEYBOARD HARNESS OK")
+      exit(0)
+    }
+  }
+
+  static func labels(in view: UIView) -> [String] {
+    buttons(in: view).compactMap { ($0 as? UILabel)?.text }
   }
 }

@@ -34,9 +34,10 @@ public class WispraKeyboardBridgeModule: Module {
       KeyboardSession.shared.state
     }.runOnQueue(.main)
 
-    // A transcribed piece for the keyboard, typed at the cursor in order
-    AsyncFunction("deliverText") { (utterance: String, index: Int, text: String, last: Bool) -> Bool in
-      KeyboardSession.shared.deliver(utterance: utterance, index: index, text: text, last: last)
+    // A transcribed piece for the keyboard, typed at the cursor in order; failed: it could not be
+    // transcribed (the keyboard says so instead of "not heard")
+    AsyncFunction("deliverText") { (utterance: String, index: Int, text: String, last: Bool, failed: Bool) -> Bool in
+      KeyboardSession.shared.deliver(utterance: utterance, index: index, text: text, last: last, failed: failed)
     }.runOnQueue(.main)
 
     // Whether the Wispra keyboard is turned on in Settings (from the list of keyboards iOS keeps,

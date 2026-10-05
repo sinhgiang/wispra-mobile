@@ -142,8 +142,8 @@ final class KeyboardSession {
 
   /// Adds a transcribed piece to the list the keyboard reads, and wakes the keyboard. True when the
   /// words are stored where the keyboard reads them (the shared keychain).
-  func deliver(utterance: String, index: Int, text: String, last: Bool) -> Bool {
-    let json = Self.appendChunk(to: SharedChannel.read(.chunks), utterance: utterance, index: index, text: text, last: last, nowMs: Date().timeIntervalSince1970 * 1000)
+  func deliver(utterance: String, index: Int, text: String, last: Bool, failed: Bool = false) -> Bool {
+    let json = Self.appendChunk(to: SharedChannel.read(.chunks), utterance: utterance, index: index, text: text, last: last, failed: failed, nowMs: Date().timeIntervalSince1970 * 1000)
     let stored = SharedChannel.write(.chunks, json)
     // Works only while Wispra is open; kept for keyboards of earlier builds
     UIPasteboard(name: Self.chunksPasteboard, create: true)?.setItems(
@@ -153,12 +153,12 @@ final class KeyboardSession {
   }
 
   /// The list of pieces with this one added; the keyboard only needs the recent ones
-  static func appendChunk(to old: String?, utterance: String, index: Int, text: String, last: Bool, nowMs: Double) -> String {
+  static func appendChunk(to old: String?, utterance: String, index: Int, text: String, last: Bool, failed: Bool = false, nowMs: Double) -> String {
     var list: [[String: Any]] = []
     if let data = old?.data(using: .utf8), let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
       list = parsed
     }
-    list.append(["u": utterance, "i": index, "text": text, "at": nowMs, "last": last])
+    list.append(["u": utterance, "i": index, "text": text, "at": nowMs, "last": last, "failed": failed])
     if list.count > 40 { list.removeFirst(list.count - 40) }
     guard let data = try? JSONSerialization.data(withJSONObject: list), let json = String(data: data, encoding: .utf8) else { return "[]" }
     return json

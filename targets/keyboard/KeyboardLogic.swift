@@ -74,15 +74,17 @@ enum KeyboardLogic {
   }
 }
 
-/// One piece of what was said in a listening session, transcribed by the Wispra app and left on the
-/// pasteboard "com.sinhgiang.wispramobile.keyboard.chunks" as a JSON list of
-/// { u: utterance id, i: index in it, text, at: ms since 1970, last: true for its final piece }.
+/// One piece of what was said in a listening session, transcribed by the Wispra app and left in the
+/// shared keychain (SharedChannel, "chunks") as a JSON list of { u: utterance id, i: index in it,
+/// text, at: ms since 1970, last: true for its final piece, failed: true when it could not be
+/// transcribed (as opposed to nothing said) }.
 struct DictationChunk: Equatable {
   let utterance: String
   let index: Int
   let text: String
   let at: Double
   let last: Bool
+  var failed = false
 
   var key: String { "\(utterance)#\(index)" }
 }
@@ -94,7 +96,7 @@ enum ChunkQueue {
     return list.compactMap { item in
       guard let u = item["u"] as? String, let i = item["i"] as? Int, let text = item["text"] as? String,
             let at = item["at"] as? Double else { return nil }
-      return DictationChunk(utterance: u, index: i, text: text, at: at, last: item["last"] as? Bool ?? false)
+      return DictationChunk(utterance: u, index: i, text: text, at: at, last: item["last"] as? Bool ?? false, failed: item["failed"] as? Bool ?? false)
     }
   }
 
@@ -124,8 +126,8 @@ enum ChunkQueue {
   }
 }
 
-/// The listening session the Wispra app runs, as it reports it on the pasteboard
-/// "com.sinhgiang.wispramobile.keyboard.session": { until, beat } in ms since 1970
+/// The listening session the Wispra app runs, as it reports it in the shared keychain
+/// (SharedChannel, "session"): { until, beat } in ms since 1970
 enum SessionStatus {
   /// On, and the app wrote recently (it writes every few seconds while the session runs)
   static func isLive(untilMs: Double, beatMs: Double, nowMs: Double) -> Bool {

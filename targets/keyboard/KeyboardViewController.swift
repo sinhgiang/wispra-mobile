@@ -6,8 +6,8 @@ import UIKit
 ///
 /// Apple gives keyboards no microphone ("Custom keyboards ... have no access to the device
 /// microphone"), so the mic hands over to the Wispra app, which records and transcribes with Wispra
-/// Cloud, and the words come back through a named pasteboard (apps of the same team; needs Allow
-/// Full Access) and are typed at the cursor. Typing letters works without full access, as App
+/// Cloud, and the words come back through the keychain group the app and the keyboard share
+/// (SharedChannel.swift; needs Allow Full Access) and are typed at the cursor. Typing letters works without full access, as App
 /// Review guideline 4.4.1 requires.
 final class KeyboardViewController: UIInputViewController {
   /// Same name as in modules/wispra-keyboard-bridge (the app writes, the keyboard reads)
@@ -22,7 +22,7 @@ final class KeyboardViewController: UIInputViewController {
   static let notifyPrefix = "com.sinhgiang.wispramobile.dictation"
   /// After the red mic is tapped, how long the keyboard waits for the words before it says they did
   /// not come (instead of "Đang viết…" forever)
-  static let wordsWaitSeconds: TimeInterval = 45
+  static var wordsWaitSeconds: TimeInterval = 45
 
   private enum Shift { case off, once, locked }
 
@@ -54,6 +54,8 @@ final class KeyboardViewController: UIInputViewController {
   private var listening = false
   /// The mic was tapped red → purple: words are on their way, until the last piece comes
   private var waitingForWords = false
+  /// A piece of this utterance could not be transcribed (not the same as nothing said)
+  private var piecesFailed = false
   /// Pieces already typed (utterance#index), kept across keyboard loads
   private var typedPieces: [String] = UserDefaults.standard.stringArray(forKey: "typedPieces") ?? []
   private var observingText = false
@@ -430,6 +432,9 @@ final class KeyboardViewController: UIInputViewController {
     if let session = readSession(), SessionStatus.isLive(untilMs: session.until, beatMs: session.beat, nowMs: nowMs()) {
       post("start")
       listening = true
+      // A new utterance: whatever the last one still waited for is over
+      waitingForWords = false
+      piecesFailed = false
       lastTyped = nil
       refreshUndo()
       paintMic()
@@ -510,6 +515,7 @@ final class KeyboardViewController: UIInputViewController {
     guard !pieces.isEmpty else { return }
     for piece in pieces {
       typedPieces.append(piece.key)
+      if piece.failed { piecesFailed = true }
       let words = piece.text.trimmingCharacters(in: .whitespacesAndNewlines)
       if !words.isEmpty {
         let commit = Self.spaced(before: textDocumentProxy.documentContextBeforeInput, words: words, after: textDocumentProxy.documentContextAfterInput)
@@ -518,7 +524,10 @@ final class KeyboardViewController: UIInputViewController {
       }
       if piece.last {
         waitingForWords = false
-        statusLabel.text = lastTyped == nil ? "Không nghe rõ, thử lại" : "Đã gõ bằng Wispra"
+        statusLabel.text = piecesFailed
+          ? "Không chép được lời (mạng?). Bản ghi ở trong Wispra"
+          : lastTyped == nil ? "Không nghe rõ, thử lại" : "Đã gõ bằng Wispra"
+        piecesFailed = false
       }
     }
     if typedPieces.count > 200 { typedPieces.removeFirst(typedPieces.count - 200) }

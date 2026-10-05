@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { actionFor, DEFAULT_SESSION_MINUTES, minutesLeft, parseSessionMinutes, SESSION_CHOICES, sessionLabel, wordsFrom } from '../keyboard-session';
+import { actionFor, DEFAULT_SESSION_MINUTES, minutesLeft, parseSessionMinutes, pieceFailed, SESSION_CHOICES, sessionLabel, wordsFrom } from '../keyboard-session';
 
 describe('each piece of a listening session', () => {
   it('is transcribed when something was said and Wispra Cloud may be used', () => {
@@ -18,6 +18,14 @@ describe('each piece of a listening session', () => {
   it('gives the keyboard the words, or nothing when the transcription failed', () => {
     expect(wordsFrom({ ok: true, text: '  Hôm nay chúng ta họp lúc 2 giờ. ' })).toBe('Hôm nay chúng ta họp lúc 2 giờ.');
     expect(wordsFrom({ ok: false, error: 'Offline', transient: true })).toBe('');
+  });
+
+  it('tells a piece that could not be transcribed from one with nothing said (T-0163 review)', () => {
+    expect(pieceFailed({ ok: false, error: 'Could not reach Wispra Cloud (offline).', transient: true })).toBe(true);
+    expect(pieceFailed({ ok: false, error: 'Your Wispra Cloud sign-in has expired. Sign in again in Account.' })).toBe(true);
+    expect(pieceFailed({ ok: false, error: 'No speech was heard in this recording.' })).toBe(false);
+    expect(pieceFailed({ ok: false, error: 'No audio was recorded in this file.' })).toBe(false);
+    expect(pieceFailed({ ok: true, text: 'Xin chào' })).toBe(false);
   });
 });
 

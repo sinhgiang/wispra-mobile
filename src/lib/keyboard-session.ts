@@ -30,6 +30,13 @@ export function wordsFrom(result: TranscribeResult): string {
   return result.ok ? result.text.trim() : '';
 }
 
+// Whether a piece failed to be transcribed (no connection, server busy, sign-in…), as opposed to
+// having nothing said in it: the keyboard then says the words could not be written, not "not heard"
+// (T-0163 review)
+export function pieceFailed(result: TranscribeResult): boolean {
+  return !result.ok && !result.error.startsWith('No speech') && !result.error.startsWith('No audio');
+}
+
 // How long a session lasts, in minutes (T-0163): chosen once in Account, never each time the mic
 // opens Wispra. Each use of the keyboard's mic starts the count again, so a session in use goes on.
 export const SESSION_CHOICES = [15, 60, 240] as const;
