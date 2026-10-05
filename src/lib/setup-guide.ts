@@ -56,9 +56,9 @@ function recordings(n: number): string {
   return `${n} recording${n === 1 ? '' : 's'}`;
 }
 
-// What is missing, said where it matters: the sign-in on Dictate and Meetings. The keyboard (iPhone)
-// and the mic button (Android) are small rows in Account (otherAppsRows), so Dictate keeps only the
-// mic and the recent dictations (T-0154).
+// What is missing, said where it matters: the sign-in on Meetings. Dictate shows no cards at all
+// (the owner, T-0154): the keyboard (iPhone) and the mic button (Android) are small rows in Account
+// (otherAppsRows), next to the sign-in.
 export function setupReminders(state: SetupState, screen: 'dictate' | 'meetings'): Reminder[] {
   const out: Reminder[] = [];
   if (!state.signedIn) {

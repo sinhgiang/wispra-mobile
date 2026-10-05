@@ -43,11 +43,12 @@ afterEach(() => {
 
 describe('Dictate', () => {
   it('shows the mic and nothing about setting up the keyboard, on iPhone and on Android', async () => {
-    for (const state of [iphone, android]) {
+    // Signed out too: no card on Dictate at all (signing in is in Account)
+    for (const state of [iphone, android, { ...iphone, signedIn: false, waiting: 2 }]) {
       mockSetup = state;
       const view = await render(<DictateScreen />);
       expect(screen.getByLabelText('Start dictating')).toBeTruthy();
-      for (const gone of [/Switch to the Wispra keyboard/, /Dictate into any app/, /Wispra keyboard/, /^Keyboard$/, /Mic button/, /Show me how/, /Open Settings/]) {
+      for (const gone of [/Switch to the Wispra keyboard/, /Dictate into any app/, /Wispra keyboard/, /^Keyboard$/, /Mic button/, /Show me how/, /Open Settings/, /Sign in/]) {
         expect(screen.queryByText(gone)).toBeNull();
       }
       await view.unmount();

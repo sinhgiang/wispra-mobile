@@ -4,7 +4,6 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EntryCard } from '@/components/wispra/entry-card';
-import { SetupReminders } from '@/components/wispra/setup-reminders';
 import { Button, Card, Label, MicGlyph, Title, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { formatDuration, sortEntries } from '@/lib/entries';
@@ -29,10 +28,9 @@ export default function DictateScreen() {
   return (
     <SafeAreaView edges={['top']} style={ui.screen}>
       <ScrollView contentContainerStyle={styles.content}>
+        {/* No setup cards here (the owner, T-0154): signing in, the keyboard (iPhone) and the mic
+            button (Android) are in Account; after a recording, the line below says when to sign in. */}
         <Title>Dictate</Title>
-        {/* Only the sign-in reminder, while signed out. The keyboard (iPhone) and the mic button
-            (Android) are set up from Account (T-0154). */}
-        <SetupReminders screen="dictate" />
 
         <Card style={styles.recorder}>
           {live ? (
