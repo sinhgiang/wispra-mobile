@@ -112,6 +112,10 @@ workflows:
       tag_patterns:
         - pattern: 'build-*'
           include: true
+        # The Android workflow (.github/workflows/android.yml) moves a tag build-<branch> to every
+        # pushed commit for its test APK release: those must never start an iPhone build
+        - pattern: 'build-mobile-*'
+          include: false
     integrations:
       # The App Store Connect API key added in Codemagic for Lenvid; one key serves every app of
       # the same Apple team. The key itself is never in this file.

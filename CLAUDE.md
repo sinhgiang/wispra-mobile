@@ -54,4 +54,5 @@ The owner never opens Codemagic. When there is new code for the owner to try on 
    new code to try.
 
 Branch pushes never start Codemagic, so tag only commits the owner should try. Builds use Codemagic
-minutes.
+minutes. The tags `build-mobile-<branch>` belong to the Android workflow (its test APK releases) and
+are excluded from the trigger: never use that name for an iPhone build.
