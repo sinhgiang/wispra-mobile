@@ -14,11 +14,11 @@
     <key>NSExtensionAttributes</key>
     <dict>
       <!-- Full access lets the keyboard read the words the Wispra app hands over through the
-           pasteboard. The keyboard has no letter keys and keeps nothing the user types. -->
+           pasteboard. Typing letters works without it; the keyboard keeps nothing the user types. -->
       <key>RequestsOpenAccess</key>
       <true/>
       <key>IsASCIICapable</key>
-      <false/>
+      <true/>
       <key>PrefersRightToLeft</key>
       <false/>
       <key>PrimaryLanguage</key>

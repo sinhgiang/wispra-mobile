@@ -61,8 +61,9 @@ export default function WelcomeScreen() {
               </Body>
               <GlobePicture />
               <Body style={styles.text}>
-                Tap Speak on the Wispra keyboard. Wispra opens to listen (iPhone keyboards cannot use the microphone): say your text, tap
-                Done, then tap ◀ at the top left to go back. The keyboard types your words. Tap 🌐 again for your usual keyboard.
+                Keep Wispra as your keyboard: it has every letter and types Vietnamese (Telex), so there is no need to switch back.
+                To speak, tap the small purple mic at the top left of the keyboard. Wispra opens to listen (iPhone keyboards cannot
+                use the microphone): say your text, tap Done, then tap ◀ at the top left to go back. The keyboard types your words.
               </Body>
             </Step>
           </>
