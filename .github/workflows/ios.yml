@@ -42,6 +42,37 @@ jobs:
           swiftc -parse-as-library targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift modules/wispra-keyboard-bridge/ios/Segmenter.swift targets-tests/keyboard/KeyboardTests.swift -o "$RUNNER_TEMP/keyboard-tests"
           "$RUNNER_TEMP/keyboard-tests"
 
+      # The real keyboard code (KeyboardViewController) in a small app on the iOS simulator: it loads,
+      # lays out its keys and has them tapped; a crash fails this step (see Harness.swift)
+      - name: Wispra keyboard on the iOS simulator
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Harness.app"
+          mkdir -p "$APP"
+          cp targets-tests/keyboard-sim/Info.plist "$APP/Info.plist"
+          xcrun -sdk iphonesimulator swiftc -target arm64-apple-ios16.4-simulator -module-name WispraKeyboard -parse-as-library \
+            targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift targets/keyboard/KeyboardViewController.swift \
+            targets-tests/keyboard-sim/Harness.swift -o "$APP/Harness"
+          codesign --force --sign - "$APP"
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          for runtime, items in sorted(devices.items(), reverse=True):
+              if "iOS" not in runtime:
+                  continue
+              for d in items:
+                  if d["name"].startswith("iPhone"):
+                      print(d["udid"]); sys.exit(0)
+          ')
+          echo "Simulator: $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+          perl -e 'alarm 300; exec @ARGV' xcrun simctl launch --console-pty --terminate-running-process "$UDID" com.sinhgiang.wispra.keyboardharness > harness.log 2>&1 || true
+          cat harness.log
+          xcrun simctl shutdown "$UDID" || true
+          grep -q "KEYBOARD HARNESS OK" harness.log
+
       - name: Install JavaScript dependencies
         run: npm ci
 
@@ -62,6 +93,25 @@ jobs:
           echo "::endgroup::"
           tail -n 40 xcodebuild.log
           exit $status
+
+      # What iOS reads when it loads the keyboard: the Info.plist as built (the principal class with
+      # its module name filled in), that class in the binary, the libraries it links and its size
+      - name: Inspect the built keyboard extension
+        run: |
+          set -euo pipefail
+          APPEX=$(find ~/Library/Developer/Xcode/DerivedData -path "*Release-iphoneos*" -name "*.appex" -type d | grep -v "/PlugIns/.*/PlugIns/" | head -n 1)
+          echo "Extension: $APPEX"
+          plutil -p "$APPEX/Info.plist"
+          EXE=$(plutil -extract CFBundleExecutable raw -o - "$APPEX/Info.plist")
+          PRINCIPAL=$(plutil -extract NSExtension.NSExtensionPrincipalClass raw -o - "$APPEX/Info.plist")
+          echo "Principal class: $PRINCIPAL"
+          otool -L "$APPEX/$EXE"
+          du -sh "$APPEX"
+          MODULE="${PRINCIPAL%%.*}"
+          CLASS="${PRINCIPAL#*.}"
+          MANGLED="_TtC${#MODULE}${MODULE}${#CLASS}${CLASS}"
+          echo "Looking for the class $MANGLED"
+          nm "$APPEX/$EXE" | grep "OBJC_CLASS_\$_$MANGLED"
 
       - name: Keep the build log
         if: always()
