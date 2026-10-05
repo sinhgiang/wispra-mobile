@@ -35,6 +35,9 @@ final class KeyboardSession {
   private var observingAudio = false
   private var restartAttempt = 0
   private var restartScheduled = false
+  private var lastBeatAt = Date()
+  /// What is wrong with the microphone, told to the keyboard in the status (nil: nothing)
+  private var problem: String?
   private var until = Date.distantPast
   /// How long a session lasts; each use of the keyboard's mic starts the count again
   private var minutes: Double = 60
@@ -47,6 +50,19 @@ final class KeyboardSession {
   private var file: AVAudioFile?
   private var fileURL: URL?
   private var segmenter = Segmenter()
+
+  private func log(_ text: String) { SharedLog.append("app", text) }
+
+  /// If the last run ended while a session was on (no clean end), iOS closed Wispra: say so in the log
+  /// (T-0178: in Messenger and Zalo the keyboard found no app to answer it)
+  func noteUncleanEnd() {
+    let defaults = UserDefaults.standard
+    guard let beat = defaults.object(forKey: "sessionOpenSince") as? Date else { return }
+    let last = defaults.object(forKey: "sessionLastBeat") as? Date ?? beat
+    let gap = Int(Date().timeIntervalSince(last))
+    log("Wispra was started again; the last run ended without ending its session (its last beat was \(gap) s ago): iOS closed Wispra")
+    defaults.removeObject(forKey: "sessionOpenSince")
+  }
 
   var state: [String: Any] {
     [
@@ -68,14 +84,24 @@ final class KeyboardSession {
     }
     observeKeyboard()
     observeAudio()
+    UserDefaults.standard.set(Date(), forKey: "sessionOpenSince")
+    log("session started for \(Int(max(1, minutes))) min (engine running: \(engine.isRunning))")
     self.minutes = max(1, minutes)
     until = Date().addingTimeInterval(self.minutes * 60)
     heartbeat?.invalidate()
+    lastBeatAt = Date()
     heartbeat = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
       guard let self = self else { return }
+      // A beat that comes late means the app was not running: iOS had suspended it
+      let late = Date().timeIntervalSince(self.lastBeatAt)
+      if late > 15 { self.log("the app was not running for \(Int(late)) s (suspended by iOS), engine running: \(self.engine.isRunning)") }
+      self.lastBeatAt = Date()
+      UserDefaults.standard.set(Date(), forKey: "sessionLastBeat")
       if Date() >= self.until {
+        self.log("session over (its time ran out)")
         self.end()
       } else {
+        if !self.engine.isRunning { self.restartEngine() }
         self.writeStatus()
       }
     }
@@ -105,13 +131,27 @@ final class KeyboardSession {
     let center = NotificationCenter.default
     center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
       guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt else { return }
+      let reason = (note.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt).map(String.init) ?? "none"
+      self?.log("audio \(raw == SessionRecovery.interruptionBegan ? "interrupted by another app or iOS" : "interruption ended") (reason \(reason))")
+      if raw == SessionRecovery.interruptionBegan { self?.problem = "microphone used by another app" }
       if SessionRecovery.shouldRestart(interruptionTypeRaw: raw) { self?.restartEngine() }
     }
     center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+      self?.log("audio route or settings changed")
       self?.restartEngine()
     }
     center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.log("iOS reset its audio services")
       self?.restartEngine()
+    }
+    center.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.log("iOS warned that memory is short (it may close Wispra next)")
+    }
+    center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.log("Wispra went to the background (engine running: \(self?.engine.isRunning ?? false))")
+    }
+    center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.log("Wispra came to the front (engine running: \(self?.engine.isRunning ?? false))")
     }
   }
 
@@ -121,10 +161,16 @@ final class KeyboardSession {
     guard running, until > Date() else { return }
     do {
       try AVAudioSession.sharedInstance().setActive(true)
-      if !engine.isRunning { try startEngine() }
+      if !engine.isRunning {
+        try startEngine()
+        log("the microphone was started again")
+      }
       restartAttempt = 0
+      problem = nil
       writeStatus()
     } catch {
+      log("could not start the microphone again: \(error.localizedDescription)")
+      problem = "microphone busy"
       guard !restartScheduled else { return }
       guard let wait = SessionRecovery.retryDelay(attempt: restartAttempt) else {
         restartAttempt = 0
@@ -141,6 +187,8 @@ final class KeyboardSession {
   }
 
   func end() {
+    if running { log("session ended") }
+    UserDefaults.standard.removeObject(forKey: "sessionOpenSince")
     heartbeat?.invalidate()
     heartbeat = nil
     queue.sync {
@@ -161,7 +209,16 @@ final class KeyboardSession {
   // MARK: The keyboard's mic
 
   func beginListening() {
-    guard running, until > Date() else { return }
+    guard running, until > Date() else {
+      log("the keyboard asked to listen, but no session is on")
+      return
+    }
+    // The engine may have been stopped (another app took the audio): start it before listening
+    if !engine.isRunning {
+      log("the keyboard asked to listen, but the microphone was stopped: starting it")
+      restartEngine()
+    }
+    log("listening for the keyboard (engine running: \(engine.isRunning))")
     // A session in use goes on: the count starts again from now
     until = max(until, Date().addingTimeInterval(minutes * 60))
     queue.async {
@@ -176,7 +233,10 @@ final class KeyboardSession {
 
   func finishListening() {
     queue.async {
-      guard self.listening else { return }
+      guard self.listening else {
+        SharedLog.append("app", "the keyboard asked to stop, but nothing was being listened to")
+        return
+      }
       self.closePiece(last: true)
       self.listening = false
       DispatchQueue.main.async { self.writeStatus(); self.onState?(self.state) }
@@ -199,6 +259,7 @@ final class KeyboardSession {
   func deliver(utterance: String, index: Int, text: String, last: Bool, failed: Bool = false) -> Bool {
     let json = Self.appendChunk(to: SharedChannel.read(.chunks), utterance: utterance, index: index, text: text, last: last, failed: failed, nowMs: Date().timeIntervalSince1970 * 1000)
     let stored = SharedChannel.write(.chunks, json)
+    log("words handed to the keyboard: piece \(index), \(text.count) letters, last \(last), failed \(failed), stored \(stored)")
     // Works only while Wispra is open; kept for keyboards of earlier builds
     UIPasteboard(name: Self.chunksPasteboard, create: true)?.setItems(
       [["public.utf8-plain-text": json]], options: [.expirationDate: Date().addingTimeInterval(15 * 60)])
@@ -274,6 +335,7 @@ final class KeyboardSession {
       "voiced": voiced,
     ]
     index += 1
+    SharedLog.append("app", "piece \(info["index"] ?? "?") closed: \(Int(duration * 1000)) ms, voiced \(voiced), last \(last)")
     DispatchQueue.main.async { self.onChunk?(info) }
   }
 
@@ -298,11 +360,13 @@ final class KeyboardSession {
   /// The beat the keyboard checks (every 5 seconds, in the background too): a session whose beat
   /// stops is over for the keyboard
   private func writeStatus() {
-    let status: [String: Any] = [
+    var status: [String: Any] = [
       "until": running ? until.timeIntervalSince1970 * 1000 : 0,
       "beat": Date().timeIntervalSince1970 * 1000,
       "listening": queue.sync { listening },
+      "engine": engine.isRunning,
     ]
+    if let problem = problem { status["problem"] = problem }
     guard let data = try? JSONSerialization.data(withJSONObject: status), let json = String(data: data, encoding: .utf8) else { return }
     SharedChannel.write(.session, json)
     UIPasteboard(name: Self.sessionPasteboard, create: true)?.setItems([["public.utf8-plain-text": json]], options: [:])

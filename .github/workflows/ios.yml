@@ -41,7 +41,7 @@ jobs:
         run: |
           # The app and the keyboard share one SharedChannel.swift, kept as two identical copies
           diff targets/keyboard/SharedChannel.swift modules/wispra-keyboard-bridge/ios/SharedChannel.swift
-          swiftc -parse-as-library targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift modules/wispra-keyboard-bridge/ios/Segmenter.swift modules/wispra-keyboard-bridge/ios/SessionRecovery.swift targets-tests/keyboard/KeyboardTests.swift -o "$RUNNER_TEMP/keyboard-tests"
+          swiftc -parse-as-library targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift targets/keyboard/SharedChannel.swift modules/wispra-keyboard-bridge/ios/Segmenter.swift modules/wispra-keyboard-bridge/ios/SessionRecovery.swift targets-tests/keyboard/KeyboardTests.swift -o "$RUNNER_TEMP/keyboard-tests"
           "$RUNNER_TEMP/keyboard-tests"
 
       # The real keyboard code (KeyboardViewController) in a small app on the iOS simulator: it loads,

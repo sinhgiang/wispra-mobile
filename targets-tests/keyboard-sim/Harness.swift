@@ -197,11 +197,44 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
       check(KeyboardSession.shared.deliver(utterance: "t3", index: 0, text: "", last: true, failed: true), "the app hands over a failed piece")
       keyboard.typeQueuedPieces()
       check(labels(in: keyboard.view).contains("Không chép được lời. Bản ghi ở trong Wispra"), "a piece that could not be transcribed says so")
+      stoppedByIOS(keyboard: keyboard, mic: mic)
+    }
+  }
 
-      keyboard.beginAppearanceTransition(false, animated: false)
-      keyboard.endAppearanceTransition()
-      print("KEYBOARD HARNESS OK")
-      exit(0)
+  static func session(beatAgoMs: Double) -> String {
+    let now = Date().timeIntervalSince1970 * 1000
+    return "{\"until\": \(now + 10 * 60 * 1000), \"beat\": \(now - beatAgoMs)}"
+  }
+
+  /// T-0178: in Messenger and Zalo iOS stopped Wispra, and the keyboard waited for ever ("Đang viết…", or a
+  /// mic that stayed red). The app's beat stops: the keyboard must see it and say so, in both cases.
+  static func stoppedByIOS(keyboard: KeyboardViewController, mic: UIButton?) {
+    // 1. The mic is red, then iOS stops Wispra
+    SharedChannel.write(.session, session(beatAgoMs: 0))
+    mic?.sendActions(for: .touchUpInside)
+    check(mic?.accessibilityLabel == "Listening. Tap to type what you said", "a live session again: the mic is red")
+    SharedChannel.write(.session, session(beatAgoMs: 60_000))
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+      check(mic?.accessibilityLabel == "Speak with Wispra", "the app stopped beating: the mic does not stay red")
+      check(labels(in: keyboard.view).contains(KeyboardViewController.appStoppedMessage), "and it says iOS stopped Wispra")
+
+      // 2. The red mic is tapped to finish, and the app is gone before the words come
+      KeyboardViewController.wordsWaitSeconds = 10
+      SharedChannel.write(.session, session(beatAgoMs: 0))
+      mic?.sendActions(for: .touchUpInside)
+      mic?.sendActions(for: .touchUpInside)
+      check(labels(in: keyboard.view).contains("Đang viết…"), "waiting for the words")
+      SharedChannel.write(.session, session(beatAgoMs: 60_000))
+      DispatchQueue.main.asyncAfter(deadline: .now() + 4.2) {
+        check(labels(in: keyboard.view).contains(KeyboardViewController.appStoppedMessage), "waiting and the app is gone: it says so, not Đang viết… for ever")
+        let log = SharedLog.read().joined(separator: "\n")
+        check(log.contains("no sign of life"), "and the keyboard noted it in the log")
+
+        keyboard.beginAppearanceTransition(false, animated: false)
+        keyboard.endAppearanceTransition()
+        print("KEYBOARD HARNESS OK")
+        exit(0)
+      }
     }
   }
 

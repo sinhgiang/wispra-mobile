@@ -128,6 +128,38 @@ enum ChunkQueue {
 
 /// The listening session the Wispra app runs, as it reports it in the shared keychain
 /// (SharedChannel, "session"): { until, beat } in ms since 1970
+/// Never waiting for ever (T-0178). Words come back from the Wispra app, which iOS may stop while another app
+/// (Messenger, Zalo) is in front: the app's beat then stops, and the keyboard said "Đang viết…" for ever,
+/// even after the screen was locked and unlocked. These rules say, from how long it has waited and how long
+/// ago the app last gave a sign of life, what to tell the user.
+enum WordsWait {
+  enum Outcome: Equatable {
+    case waiting
+    /// The app stopped giving signs of life: iOS stopped Wispra, so the words will not come
+    case appStopped
+    /// The app is alive but nothing came in time
+    case timedOut
+  }
+
+  /// How long to wait for words after the red mic was tapped
+  static let limitMs = 45_000.0
+  /// The app writes its beat every 5 s; this long without one, it is not running
+  static let deadBeatMs = 25_000.0
+  /// With no session status at all, this long before it is called stopped
+  static let noStatusGraceMs = 3_000.0
+
+  static func appStopped(beatAgeMs: Double?) -> Bool {
+    guard let age = beatAgeMs else { return true }
+    return age > deadBeatMs
+  }
+
+  static func outcome(waitedMs: Double, beatAgeMs: Double?) -> Outcome {
+    if waitedMs >= limitMs { return .timedOut }
+    if appStopped(beatAgeMs: beatAgeMs) && waitedMs >= noStatusGraceMs { return .appStopped }
+    return .waiting
+  }
+}
+
 enum SessionStatus {
   /// On, and the app wrote recently (it writes every few seconds while the session runs)
   static func isLive(untilMs: Double, beatMs: Double, nowMs: Double) -> Bool {

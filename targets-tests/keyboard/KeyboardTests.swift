@@ -139,6 +139,25 @@ struct KeyboardTests {
     check("gives up after six tries", SessionRecovery.retryDelay(attempt: 6) == nil && SessionRecovery.retryDelay(attempt: -1) == nil)
   }
 
+  static func wordsWait() {
+    check("waits while the app beats", WordsWait.outcome(waitedMs: 10_000, beatAgeMs: 4_000) == .waiting)
+    check("the app stopped: its beat is old", WordsWait.outcome(waitedMs: 10_000, beatAgeMs: 40_000) == .appStopped)
+    check("the app stopped: no session status at all", WordsWait.outcome(waitedMs: 10_000, beatAgeMs: nil) == .appStopped)
+    check("a moment of grace before saying it stopped", WordsWait.outcome(waitedMs: 1_000, beatAgeMs: nil) == .waiting)
+    check("alive but nothing came in 45 s", WordsWait.outcome(waitedMs: 46_000, beatAgeMs: 3_000) == .timedOut)
+    check("never waiting for ever, whatever the beat", WordsWait.outcome(waitedMs: 120_000, beatAgeMs: nil) == .timedOut && WordsWait.outcome(waitedMs: 120_000, beatAgeMs: 2_000) == .timedOut)
+    check("the red mic: the app is gone when it stops beating", WordsWait.appStopped(beatAgeMs: 30_000) && !WordsWait.appStopped(beatAgeMs: 5_000))
+  }
+
+  static func sharedLog() {
+    let old = (0..<SharedLog.maxLines).map { "l($0)" }
+    let next = SharedLog.appended(to: old, "new")
+    check("the log keeps the newest lines", next.count == SharedLog.maxLines && next.last == "new" && next.first == "l1")
+    check("the log reads back what it wrote", SharedLog.parse(SharedLog.serialize(["a", "b: c"])) == ["a", "b: c"])
+    check("a broken log is empty", SharedLog.parse("nope").isEmpty && SharedLog.parse(nil).isEmpty)
+    check("a line says when, who and what", SharedLog.line("app", "interrupted", at: Date(timeIntervalSince1970: 0)).hasSuffix(" app: interrupted"))
+  }
+
   static func main() {
     telex()
     layout()
@@ -147,6 +166,8 @@ struct KeyboardTests {
     chunks()
     session()
     recovery()
+    wordsWait()
+    sharedLog()
     print("\(passed)/\(passed + failed) passed")
     if failed > 0 { exit(1) }
   }

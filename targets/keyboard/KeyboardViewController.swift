@@ -56,6 +56,16 @@ final class KeyboardViewController: UIInputViewController {
   private var waitingForWords = false
   /// A piece of this utterance could not be transcribed (not the same as nothing said)
   private var piecesFailed = false
+  /// When the red mic was tapped to finish, kept across locking the screen and reloading the keyboard
+  /// (UserDefaults), so "Đang viết…" can never go on for ever (T-0178)
+  private var waitingSince: Date? {
+    get { UserDefaults.standard.object(forKey: "waitingSince") as? Date }
+    set { UserDefaults.standard.set(newValue, forKey: "waitingSince") }
+  }
+  /// Watches the app while the mic is red: if iOS stops Wispra, the mic must not stay red
+  private var listenTimer: Timer?
+  /// A message about something that failed is on the strip: it stays until the next tap on the mic
+  private var problemShown = false
   /// Pieces already typed (utterance#index), kept across keyboard loads
   private var typedPieces: [String] = UserDefaults.standard.stringArray(forKey: "typedPieces") ?? []
   private var observingText = false
@@ -134,6 +144,8 @@ final class KeyboardViewController: UIInputViewController {
     // Coming back from Wispra: the words may already be waiting, or arrive in a moment
     typeWaitingWords()
     typeQueuedPieces()
+    // The screen was locked, or another app came and went, while waiting: say how it ended
+    resumeWaitIfAny()
     startPolling(seconds: 60)
     showSession()
   }
@@ -145,8 +157,10 @@ final class KeyboardViewController: UIInputViewController {
     stopDeleteRepeat()
     // The field goes away: what was being said has nowhere to go
     if listening {
+      SharedLog.append("keyboard", "the keyboard went away while listening: cancelled")
       post("cancel")
       listening = false
+      listenTimer?.invalidate()
       paintMic()
     }
   }
@@ -416,22 +430,35 @@ final class KeyboardViewController: UIInputViewController {
 
   /// Purple: start speaking (or start a listening session in Wispra first). Red: done, type it.
   @objc private func micTapped() {
+    problemShown = false
     guard hasFullAccess else {
       statusLabel.text = "Bật Cho phép truy cập đầy đủ để nói"
       return
     }
     if listening {
+      // The app may have been stopped by iOS while the mic was red: then there is nothing to stop
+      if WordsWait.appStopped(beatAgeMs: beatAgeMs()) {
+        SharedLog.append("keyboard", "red mic tapped, but the app gave no sign of life for \(beatAgeText())")
+        stopListeningBecauseAppStopped()
+        return
+      }
+      SharedLog.append("keyboard", "red mic tapped: stop (app beat \(beatAgeText()) ago)")
       post("stop")
       listening = false
+      listenTimer?.invalidate()
       waitingForWords = true
+      waitingSince = Date()
       paintMic()
       statusLabel.text = "Đang viết…"
       startPolling(seconds: Self.wordsWaitSeconds)
       return
     }
     if let session = readSession(), SessionStatus.isLive(untilMs: session.until, beatMs: session.beat, nowMs: nowMs()) {
+      SharedLog.append("keyboard", "purple mic tapped: session live (beat \(beatAgeText()) ago, \(SessionStatus.minutesLeft(untilMs: session.until, nowMs: nowMs())) min left): start")
       post("start")
       listening = true
+      waitingSince = nil
+      watchWhileListening()
       // A new utterance: whatever the last one still waited for is over
       waitingForWords = false
       piecesFailed = false
@@ -442,11 +469,92 @@ final class KeyboardViewController: UIInputViewController {
       return
     }
     // No session: Wispra starts one (Apple lets only the app start the microphone)
+    SharedLog.append("keyboard", "purple mic tapped: no live session (\(sessionDescription())): opening Wispra")
     guard let url = URL(string: "wispra://keyboard-session") else { return }
     if openContainingApp(url) {
       statusLabel.text = "Bật phiên nghe trong Wispra, rồi bấm ◀ để quay lại"
     } else {
       statusLabel.text = "Mở Wispra để bật phiên nghe, rồi quay lại"
+    }
+  }
+
+  // MARK: Never waiting for ever (T-0178)
+
+  /// How long ago the app last wrote its beat; nil when there is no session status at all
+  private func beatAgeMs() -> Double? {
+    guard let session = readSession() else { return nil }
+    return nowMs() - session.beat
+  }
+
+  private func beatAgeText() -> String {
+    guard let age = beatAgeMs() else { return "no status" }
+    return "\(Int(age / 1000)) s"
+  }
+
+  private func sessionDescription() -> String {
+    guard let session = readSession() else { return "no session status" }
+    let left = Int((session.until - nowMs()) / 60_000)
+    return "beat \(Int((nowMs() - session.beat) / 1000)) s ago, \(left) min left"
+  }
+
+  static let appStoppedMessage = "Wispra đã bị iPhone dừng, chữ chưa tới. Mở Wispra rồi nói lại"
+
+  /// The mic is red but the app is gone: back to purple, and say so
+  private func stopListeningBecauseAppStopped() {
+    listening = false
+    listenTimer?.invalidate()
+    waitingForWords = false
+    waitingSince = nil
+    paintMic()
+    showProblem(Self.appStoppedMessage)
+  }
+
+  private func showProblem(_ text: String) {
+    problemShown = true
+    statusLabel.text = text
+  }
+
+  /// While the mic is red, look every 2 s whether the app still beats
+  private func watchWhileListening() {
+    listenTimer?.invalidate()
+    listenTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] timer in
+      guard let self = self, self.listening else {
+        timer.invalidate()
+        return
+      }
+      if WordsWait.appStopped(beatAgeMs: self.beatAgeMs()) {
+        SharedLog.append("keyboard", "listening, but the app gave no sign of life for \(self.beatAgeText()): iOS stopped Wispra?")
+        timer.invalidate()
+        self.stopListeningBecauseAppStopped()
+      }
+    }
+  }
+
+  /// After the screen was locked or the keyboard reloaded: a wait that was going on is judged by how long ago
+  /// it began
+  private func resumeWaitIfAny() {
+    guard waitingSince != nil else { return }
+    waitingForWords = true
+    checkWait()
+  }
+
+  /// Judges a wait for words: still waiting, the app stopped, or too long
+  private func checkWait() {
+    guard waitingForWords, let since = waitingSince else { return }
+    let waited = Date().timeIntervalSince(since) * 1000
+    switch WordsWait.outcome(waitedMs: waited, beatAgeMs: beatAgeMs()) {
+    case .waiting:
+      break
+    case .appStopped:
+      SharedLog.append("keyboard", "no words after \(Int(waited / 1000)) s and the app gave no sign of life for \(beatAgeText()): iOS stopped Wispra?")
+      waitingForWords = false
+      waitingSince = nil
+      showProblem(Self.appStoppedMessage)
+    case .timedOut:
+      SharedLog.append("keyboard", "no words after \(Int(waited / 1000)) s (the app beats \(beatAgeText()) ago)")
+      waitingForWords = false
+      waitingSince = nil
+      showProblem("Chưa nhận được chữ. Mở Wispra để xem bản ghi")
     }
   }
 
@@ -459,7 +567,8 @@ final class KeyboardViewController: UIInputViewController {
 
   private func showSession() {
     paintMic()
-    guard !listening else { return }
+    // A message about a failure is not replaced by the idle text, whatever the keyboard reloaded for
+    guard !listening, !problemShown, !waitingForWords else { return }
     if let session = readSession(), SessionStatus.isLive(untilMs: session.until, beatMs: session.beat, nowMs: nowMs()) {
       statusLabel.text = "Phiên nghe · còn \(SessionStatus.minutesLeft(untilMs: session.until, nowMs: nowMs())) phút"
     } else if lastTyped == nil {
@@ -523,7 +632,11 @@ final class KeyboardViewController: UIInputViewController {
         lastTyped = (lastTyped ?? "") + commit
       }
       if piece.last {
+        if let since = waitingSince {
+          SharedLog.append("keyboard", "words arrived after \(Int(Date().timeIntervalSince(since) * 1000)) ms")
+        }
         waitingForWords = false
+        waitingSince = nil
         statusLabel.text = piecesFailed
           ? "Không chép được lời. Bản ghi ở trong Wispra"
           : lastTyped == nil ? "Không nghe rõ, thử lại" : "Đã gõ bằng Wispra"
@@ -561,17 +674,20 @@ final class KeyboardViewController: UIInputViewController {
         timer.invalidate()
         return
       }
-      if Date() > self.pollUntil {
-        timer.invalidate()
-        // The words never came: say what to do instead of "Đang viết…" forever
-        if self.waitingForWords {
-          self.waitingForWords = false
-          self.statusLabel.text = "Chưa nhận được chữ. Mở Wispra để xem bản ghi"
-        }
-        return
-      }
       self.typeWaitingWords()
       self.typeQueuedPieces()
+      // Say what happened instead of "Đang viết…" for ever (the app stopped, or too long)
+      self.checkWait()
+      if Date() > self.pollUntil {
+        timer.invalidate()
+        if self.waitingForWords, let since = self.waitingSince {
+          // The poll is over: whatever the beat says, the wait is
+          SharedLog.append("keyboard", "no words after \(Int(Date().timeIntervalSince(since))) s")
+          self.waitingForWords = false
+          self.waitingSince = nil
+          self.showProblem("Chưa nhận được chữ. Mở Wispra để xem bản ghi")
+        }
+      }
     }
   }
 

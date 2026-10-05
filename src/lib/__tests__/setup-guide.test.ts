@@ -78,6 +78,7 @@ describe('"Dictate in other apps" in Account (T-0154)', () => {
       ['Wispra keyboard', 'ios-settings'],
       ['Listening session', 'session-length'],
       ['How the keyboard works', '/welcome'],
+      ['Keyboard log', '/keyboard-log'],
     ]);
     expect(rows[0]).toMatchObject({ value: 'Turn on', attention: true });
     expect(otherAppsRows(ownersIphone)[0]).toMatchObject({ value: 'On', attention: false });
@@ -98,7 +99,7 @@ describe('"Dictate in other apps" in Account (T-0154)', () => {
     const screens = [...otherAppsRows(ownersIphone), ...otherAppsRows(android)]
       .map((r) => r.target)
       .filter((t) => t !== 'ios-settings' && t !== 'session-length');
-    expect(screens.sort()).toEqual(['/dictation-setup', '/keyboard-setup', '/welcome']);
+    expect(screens.sort()).toEqual(['/dictation-setup', '/keyboard-log', '/keyboard-setup', '/welcome']);
     for (const screen of screens) expect(existsSync(join(__dirname, '..', '..', 'app', `${screen.slice(1)}.tsx`))).toBe(true);
   });
 });

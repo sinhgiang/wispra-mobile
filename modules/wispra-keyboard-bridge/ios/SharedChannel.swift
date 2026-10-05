@@ -19,7 +19,7 @@ enum SharedChannel {
   static let groupSuffix = "com.sinhgiang.wispramobile.shared"
 
   enum Key: String {
-    case session, chunks, seen
+    case session, chunks, seen, log
   }
 
   /// <team>.com.sinhgiang.wispramobile.shared. The team prefix comes from Info.plist
@@ -110,4 +110,47 @@ enum SharedChannel {
   static func remove(_ key: Key) {
     SecItemDelete(query(key) as CFDictionary)
   }
+}
+
+/// What happened, written by both sides into the shared keychain (T-0178): the app's audio session
+/// (interruptions, restarts, memory warnings, being stopped by iOS) and the keyboard's side (mic taps, what
+/// it saw of the session, how long it waited for words). Shown in Account › Keyboard log, so the next try in
+/// an app where the keyboard does not work shows why instead of "Đang viết…" for ever.
+enum SharedLog {
+  static let maxLines = 120
+  private static let formatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "dd/MM HH:mm:ss"
+    return f
+  }()
+
+  /// "06/10 06:06:12 app: text"
+  static func line(_ source: String, _ text: String, at date: Date = Date()) -> String {
+    "\(formatter.string(from: date)) \(source): \(text)"
+  }
+
+  /// The lines with one more, the oldest dropped past maxLines
+  static func appended(to old: [String], _ line: String) -> [String] {
+    let all = old + [line]
+    return all.count > maxLines ? Array(all.suffix(maxLines)) : all
+  }
+
+  static func parse(_ json: String?) -> [String] {
+    guard let data = json?.data(using: .utf8), let list = try? JSONSerialization.jsonObject(with: data) as? [String] else { return [] }
+    return list
+  }
+
+  static func serialize(_ lines: [String]) -> String {
+    guard let data = try? JSONSerialization.data(withJSONObject: lines), let json = String(data: data, encoding: .utf8) else { return "[]" }
+    return json
+  }
+
+  static func append(_ source: String, _ text: String) {
+    let lines = appended(to: parse(SharedChannel.read(.log)), line(source, text))
+    SharedChannel.write(.log, serialize(lines))
+  }
+
+  static func read() -> [String] { parse(SharedChannel.read(.log)) }
+
+  static func clear() { SharedChannel.remove(.log) }
 }

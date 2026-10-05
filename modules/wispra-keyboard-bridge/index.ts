@@ -38,6 +38,8 @@ interface NativeKeyboardBridge {
   startSession(minutes: number): Promise<SessionState>;
   endSession(): Promise<SessionState>;
   sessionState(): Promise<SessionState>;
+  keyboardLog(): Promise<string[]>;
+  clearKeyboardLog(): Promise<boolean>;
   deliverText(utterance: string, index: number, text: string, last: boolean, failed: boolean): Promise<boolean>;
   addListener(event: 'onChunk', listener: (chunk: SessionChunk) => void): Subscription;
   addListener(event: 'onSession', listener: (state: SessionState) => void): Subscription;
@@ -84,6 +86,15 @@ export async function endSessionBeforeRecording(): Promise<void> {
   } catch {
     // Nothing running, or the module is missing: recording goes on
   }
+}
+
+// What the app and the keyboard noted about the listening session, oldest first
+export async function keyboardLog(): Promise<string[]> {
+  return native ? native.keyboardLog() : [];
+}
+
+export async function clearKeyboardLog(): Promise<void> {
+  await native?.clearKeyboardLog();
 }
 
 export async function sessionState(): Promise<SessionState> {

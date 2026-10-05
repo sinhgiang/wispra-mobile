@@ -14,6 +14,7 @@ const mockSaveMinutes = jest.fn();
 let mockSavedLanguage = 'vi';
 const mockLanguageSaves: string[] = [];
 const mockSessionEnded: boolean[] = [];
+const mockLogLines: string[] = [];
 const mockNativeLanguage: string[] = [];
 const mockStartSession = jest.fn(async (minutes: number) => ({ active: true, until: Date.now() + minutes * 60_000, listening: false }));
 
@@ -43,6 +44,10 @@ jest.mock('expo-audio', () => ({ useAudioPlayer: () => ({}), useAudioPlayerStatu
 jest.mock('@/modules/wispra-keyboard-bridge', () => ({
   startSession: (m: number) => mockStartSession(m),
   endSession: async () => ({ active: false, until: 0, listening: false }),
+  keyboardLog: async () => [...mockLogLines],
+  clearKeyboardLog: async () => {
+    mockLogLines.length = 0;
+  },
   sessionState: async () => ({ active: false, until: 0, listening: false }),
   onSessionState: () => ({ remove: () => undefined }),
 }));
@@ -55,6 +60,8 @@ jest.mock('@/lib/sign-in', () => ({ signInWithGoogle: jest.fn() }));
 import AccountScreen from '@/app/(tabs)/account';
 // eslint-disable-next-line import/first
 import DictateScreen from '@/app/(tabs)/dictate';
+// eslint-disable-next-line import/first
+import KeyboardLogScreen from '@/app/keyboard-log';
 // eslint-disable-next-line import/first
 import KeyboardSessionScreen from '@/app/keyboard-session';
 // eslint-disable-next-line import/first
@@ -73,6 +80,7 @@ beforeEach(() => {
   mockSavedLanguage = 'vi';
   mockLanguageSaves.length = 0;
   mockSessionEnded.length = 0;
+  mockLogLines.length = 0;
   mockNativeLanguage.length = 0;
   mockStartSession.mockClear();
   mockSetup = iphone;
@@ -287,5 +295,26 @@ describe('what iOS does not allow is said plainly (T-0178, point 3)', () => {
     mockSetup = android;
     await render(<AccountScreen />);
     expect(screen.queryByText(SESSION_LIMITS_NOTE, { exact: false })).toBeNull();
+  });
+});
+
+describe('the keyboard log (T-0178)', () => {
+  it('Account has a Keyboard log row on iPhone, opening the log; none on Android', async () => {
+    await render(<AccountScreen />);
+    await fireEvent.press(screen.getByText('Keyboard log'));
+    expect(mockPush).toHaveBeenCalledWith('/keyboard-log');
+  });
+
+  it('shows what was noted, newest first, with the likely cause on top, and can clear it', async () => {
+    mockLogLines.push(
+      '06/10 06:05:58 keyboard: purple mic tapped: session live (beat 3 s ago, 238 min left): start',
+      '06/10 06:09:00 app: Wispra was started again; the last run ended without ending its session (its last beat was 41 s ago): iOS closed Wispra',
+    );
+    await render(<KeyboardLogScreen />);
+    expect(await screen.findByText('Last sign of a problem')).toBeTruthy();
+    expect(screen.getByText(/iOS closed Wispra while its session was on/)).toBeTruthy();
+    await fireEvent.press(screen.getByText('Clear'));
+    expect(await screen.findByText('Nothing noted yet.')).toBeTruthy();
+    expect(mockLogLines).toEqual([]);
   });
 });

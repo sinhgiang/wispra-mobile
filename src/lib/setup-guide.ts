@@ -79,10 +79,10 @@ export function setupReminders(state: SetupState): Reminder[] {
 
 // Where a row of "Dictate in other apps" leads: iPhone's Settings page of Wispra (where its keyboard
 // is turned on), the choice of the listening session's length, or a screen of the app
-export type OtherAppsTarget = 'ios-settings' | 'session-length' | '/welcome' | '/keyboard-setup' | '/dictation-setup';
+export type OtherAppsTarget = 'ios-settings' | 'session-length' | '/welcome' | '/keyboard-log' | '/keyboard-setup' | '/dictation-setup';
 
 export interface OtherAppsRow {
-  id: 'keyboard' | 'session-length' | 'keyboard-guide' | 'mic-button';
+  id: 'keyboard' | 'session-length' | 'keyboard-guide' | 'keyboard-log' | 'mic-button';
   label: string;
   // On / Turn on, when the app knows; nothing when it cannot tell
   value: string | null;
@@ -126,6 +126,14 @@ export function otherAppsRows(state: SetupState, sessionMinutes: number = DEFAUL
         attention: false,
         target: '/welcome',
         accessibilityLabel: 'How the Wispra keyboard works',
+      },
+      {
+        id: 'keyboard-log',
+        label: 'Keyboard log',
+        value: null,
+        attention: false,
+        target: '/keyboard-log',
+        accessibilityLabel: 'Keyboard log: what Wispra and its keyboard noted, to find out why the keyboard does not work in an app',
       },
     ];
   }

@@ -16,6 +16,8 @@ public class WispraKeyboardBridgeModule: Module {
     Events("onChunk", "onSession")
 
     OnCreate {
+      // A session left open by the last run means iOS closed Wispra: the log says so (T-0178)
+      KeyboardSession.shared.noteUncleanEnd()
       KeyboardSession.shared.onChunk = { [weak self] info in self?.sendEvent("onChunk", info) }
       KeyboardSession.shared.onState = { [weak self] state in self?.sendEvent("onSession", state) }
     }
@@ -28,6 +30,16 @@ public class WispraKeyboardBridgeModule: Module {
     AsyncFunction("endSession") { () -> [String: Any] in
       KeyboardSession.shared.end()
       return KeyboardSession.shared.state
+    }.runOnQueue(.main)
+
+    // What the app and the keyboard noted about the session, oldest first (Account › Keyboard log)
+    AsyncFunction("keyboardLog") { () -> [String] in
+      SharedLog.read()
+    }.runOnQueue(.main)
+
+    AsyncFunction("clearKeyboardLog") { () -> Bool in
+      SharedLog.clear()
+      return true
     }.runOnQueue(.main)
 
     AsyncFunction("sessionState") { () -> [String: Any] in
