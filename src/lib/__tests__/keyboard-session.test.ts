@@ -1,6 +1,17 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { actionFor, DEFAULT_SESSION_MINUTES, minutesLeft, parseSessionMinutes, pieceFailed, SESSION_CHOICES, sessionLabel, wordsFrom } from '../keyboard-session';
+import {
+  actionFor,
+  AUTO_START_WINDOW_MS,
+  DEFAULT_SESSION_MINUTES,
+  minutesLeft,
+  parseSessionMinutes,
+  pieceFailed,
+  SESSION_CHOICES,
+  sessionLabel,
+  shouldAutoStartSession,
+  wordsFrom,
+} from '../keyboard-session';
 
 describe('each piece of a listening session', () => {
   it('is transcribed when something was said and Wispra Cloud may be used', () => {
@@ -29,19 +40,41 @@ describe('each piece of a listening session', () => {
   });
 });
 
-describe('the session length', () => {
-  it('is chosen once in Account (T-0163): 15 minutes, 1 hour or 4 hours, 1 hour by default', () => {
-    expect(SESSION_CHOICES).toEqual([15, 60, 240]);
-    expect(DEFAULT_SESSION_MINUTES).toBe(60);
-    expect(SESSION_CHOICES.map(sessionLabel)).toEqual(['15 min', '1 hour', '4 hours']);
+describe('keeping the session by itself (T-0178, point 3)', () => {
+  const now = 1_800_000_000_000;
+  const keyboardUsed = { allowed: true, active: false, keyboardSeenAt: now - 60 * 60 * 1000, now, endedByUser: false };
+
+  it('starts when Wispra is opened and the keyboard was used within a day', () => {
+    expect(shouldAutoStartSession(keyboardUsed)).toBe(true);
+    expect(shouldAutoStartSession({ ...keyboardUsed, keyboardSeenAt: now - AUTO_START_WINDOW_MS + 1000 })).toBe(true);
   });
 
-  it('reads the saved length back, and falls back to 1 hour for anything else', () => {
-    expect(parseSessionMinutes('240')).toBe(240);
-    expect(parseSessionMinutes(' 15\n')).toBe(15);
-    expect(parseSessionMinutes(null)).toBe(60);
-    expect(parseSessionMinutes('5')).toBe(60);
-    expect(parseSessionMinutes('abc')).toBe(60);
+  it('does not start when it is not wanted or not possible', () => {
+    // The keyboard was never used, or not for more than a day
+    expect(shouldAutoStartSession({ ...keyboardUsed, keyboardSeenAt: null })).toBe(false);
+    expect(shouldAutoStartSession({ ...keyboardUsed, keyboardSeenAt: now - AUTO_START_WINDOW_MS - 1 })).toBe(false);
+    // One already runs
+    expect(shouldAutoStartSession({ ...keyboardUsed, active: true })).toBe(false);
+    // Signed out, or an account question waits: nothing goes to Wispra Cloud
+    expect(shouldAutoStartSession({ ...keyboardUsed, allowed: false })).toBe(false);
+    // The user ended it on purpose
+    expect(shouldAutoStartSession({ ...keyboardUsed, endedByUser: true })).toBe(false);
+  });
+});
+
+describe('the session length', () => {
+  it('is chosen once in Account (T-0163, T-0178): 1, 4 or 12 hours, 4 hours by default', () => {
+    expect(SESSION_CHOICES).toEqual([60, 240, 720]);
+    expect(DEFAULT_SESSION_MINUTES).toBe(240);
+    expect(SESSION_CHOICES.map(sessionLabel)).toEqual(['1 hour', '4 hours', '12 hours']);
+  });
+
+  it('reads the saved length back, and falls back to 4 hours for anything else (a 15 minutes saved before too)', () => {
+    expect(parseSessionMinutes('720')).toBe(720);
+    expect(parseSessionMinutes(' 60\n')).toBe(60);
+    expect(parseSessionMinutes(null)).toBe(240);
+    expect(parseSessionMinutes('15')).toBe(240);
+    expect(parseSessionMinutes('abc')).toBe(240);
   });
 
   it('counts the minutes left, rounded up', () => {

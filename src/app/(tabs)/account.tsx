@@ -10,7 +10,7 @@ import { signOut } from '@/lib/cloud-auth';
 import { readUsage, type Usage } from '@/lib/cloud-history';
 import { formatDuration, formatTime, needsTranscription } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
-import { SESSION_CHOICES, sessionLabel } from '@/lib/keyboard-session';
+import { SESSION_CHOICES, SESSION_LIMITS_NOTE, sessionLabel } from '@/lib/keyboard-session';
 import { otherAppsRows, type OtherAppsTarget } from '@/lib/setup-guide';
 import { signInWithGoogle } from '@/lib/sign-in';
 import { loadSessionMinutes, saveSessionMinutes } from '@/lib/storage';
@@ -155,6 +155,7 @@ function OtherApps() {
         ))}
       </View>
       {rows[0]?.target === 'ios-settings' ? <Text style={styles.hint}>In Settings: Keyboards › Wispra on, and Allow Full Access.</Text> : null}
+      {rows.some((r) => r.id === 'session-length') ? <Text style={styles.hint}>{SESSION_LIMITS_NOTE}</Text> : null}
     </View>
   );
 }

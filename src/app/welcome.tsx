@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Body, Button, Card, MicGlyph, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
-import { SPEAK_FLOW } from '@/lib/keyboard-session';
+import { SESSION_LIMITS_NOTE, SPEAK_FLOW } from '@/lib/keyboard-session';
 import { setupSteps, type StepId } from '@/lib/setup-guide';
 import { signInWithGoogle } from '@/lib/sign-in';
 import { useSetupState } from '@/lib/use-setup';
@@ -68,6 +68,9 @@ export default function WelcomeScreen() {
                 To speak, tap the small purple mic at the top left of the keyboard. The first time, Wispra opens and starts listening
                 by itself (iPhone keyboards cannot use the microphone): tap ◀ at the top left, or swipe right along the bottom edge
                 of the screen, to go back to your app. Then {SPEAK_FLOW}
+              </Body>
+              <Body style={styles.text}>
+                {SESSION_LIMITS_NOTE}
               </Body>
             </Step>
           </>

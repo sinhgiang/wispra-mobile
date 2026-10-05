@@ -8,6 +8,7 @@ import { loadSession } from '@/lib/cloud-auth';
 import { KeyboardSessionBridge } from '@/components/wispra/keyboard-session-bridge';
 import { EntriesProvider, useEntries } from '@/lib/entries-store';
 import { shouldShowGuide } from '@/lib/setup-guide';
+import { STACK_SCREEN_OPTIONS } from '@/lib/stack-options';
 import { guideSeen, markGuideSeen } from '@/lib/storage';
 import { syncTranscribeLanguage } from '@/lib/transcribe-language-store';
 import { useSetupStateBase } from '@/lib/use-setup';
@@ -79,7 +80,7 @@ export default function RootLayout() {
         <OpenGuideOnce />
         <KeyboardSessionBridge />
         <StatusBar style="light" />
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: W.bg } }}>
+        <Stack screenOptions={STACK_SCREEN_OPTIONS}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="meeting/record" options={{ gestureEnabled: false }} />
           <Stack.Screen name="meeting/[id]" />

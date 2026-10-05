@@ -7,7 +7,7 @@ import { Body, Button, MicGlyph, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { useEntries } from '@/lib/entries-store';
 import { minutesLeft, sessionLabel, SPEAK_FLOW } from '@/lib/keyboard-session';
-import { loadSessionMinutes } from '@/lib/storage';
+import { loadSessionMinutes, setSessionEndedByUser } from '@/lib/storage';
 import { endSession, onSessionState, sessionState, startSession, type SessionState } from '@/modules/wispra-keyboard-bridge';
 
 // Opened by the Wispra keyboard's purple mic when no listening session runs (T-0145). Apple only
@@ -37,6 +37,8 @@ export default function KeyboardSessionScreen() {
   useEffect(() => {
     if (started.current || !allowed) return;
     started.current = true;
+    // Asked for by the keyboard's mic: the session is wanted again
+    setSessionEndedByUser(false);
     startSession(minutes)
       .then(setState)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
@@ -93,7 +95,16 @@ export default function KeyboardSessionScreen() {
         <Body style={styles.note}>
           {`Sessions last ${sessionLabel(minutes)} (change it in Account). Only what you say while the keyboard's mic is red is sent to Wispra Cloud; iPhone shows the orange dot while the session runs.`}
         </Body>
-        {active ? <Button label="End session" onPress={() => void endSession().then(setState)} /> : null}
+        {active ? (
+          <Button
+            label="End session"
+            onPress={() => {
+              // Stays off until the keyboard's mic asks again; Wispra does not start it by itself
+              setSessionEndedByUser(true);
+              void endSession().then(setState);
+            }}
+          />
+        ) : null}
       </View>
     </SafeAreaView>
   );

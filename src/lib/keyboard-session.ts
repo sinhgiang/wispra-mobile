@@ -44,10 +44,40 @@ export function pieceFailed(result: TranscribeResult): boolean {
 export const SPEAK_FLOW =
   'tap the purple mic on the Wispra keyboard and speak. Tap the red mic when you are done: the words appear where the cursor is.';
 
-// How long a session lasts, in minutes (T-0163): chosen once in Account, never each time the mic
-// opens Wispra. Each use of the keyboard's mic starts the count again, so a session in use goes on.
-export const SESSION_CHOICES = [15, 60, 240] as const;
-export const DEFAULT_SESSION_MINUTES = 60;
+// What iOS does not allow, said to the owner (T-0178): a keyboard cannot start the microphone, only the
+// app can, and only while it is open. While a session runs the keyboard's mic works at once; when none
+// runs, Wispra has to open once. One text, for the guide and for Account.
+export const SESSION_LIMITS_NOTE =
+  "While Wispra's listening session runs, the keyboard's mic works at once. Apple lets only the app start the microphone, never a keyboard, so Wispra opens by itself when none runs: the first time, after you end the session, after it runs out, after the iPhone restarts, or when iOS closes Wispra. Wispra starts a session when you open it, if you used the keyboard in the last day.";
+
+// How long a session lasts, in minutes (T-0163, T-0178): chosen once in Account, never each time the
+// mic opens Wispra. Each use of the keyboard's mic starts the count again, so a session in use goes on.
+// Longer than before (the owner wanted to tap the mic and speak without Wispra opening): iOS only lets
+// the app start the microphone, so every end of a session is one more time Wispra has to open.
+export const SESSION_CHOICES = [60, 240, 720] as const;
+export const DEFAULT_SESSION_MINUTES = 240;
+
+// Wispra starts a session by itself when it is opened, if the keyboard was used within this long
+export const AUTO_START_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export interface AutoStartInput {
+  // Wispra Cloud may be used (signed in, and no account question waiting)
+  allowed: boolean;
+  // A session is running
+  active: boolean;
+  // When the Wispra keyboard was last on screen (ms since 1970); null: never
+  keyboardSeenAt: number | null;
+  now: number;
+  // The user ended the session on its screen: it stays off until the keyboard's mic asks for one
+  endedByUser: boolean;
+}
+
+// "Keep the session": when Wispra is opened (for any reason) and the keyboard is in use, the session
+// starts by itself, so the keyboard's mic works at once and Wispra need not open for it (T-0178)
+export function shouldAutoStartSession(input: AutoStartInput): boolean {
+  if (!input.allowed || input.active || input.endedByUser || input.keyboardSeenAt === null) return false;
+  return input.now - input.keyboardSeenAt < AUTO_START_WINDOW_MS;
+}
 
 export function sessionLabel(minutes: number): string {
   return minutes >= 60 ? `${minutes / 60} hour${minutes === 60 ? '' : 's'}` : `${minutes} min`;

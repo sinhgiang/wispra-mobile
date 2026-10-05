@@ -32,6 +32,9 @@ final class KeyboardSession {
   private let queue = DispatchQueue(label: "wispra.keyboard-session")
   private var running = false
   private var observing = false
+  private var observingAudio = false
+  private var restartAttempt = 0
+  private var restartScheduled = false
   private var until = Date.distantPast
   /// How long a session lasts; each use of the keyboard's mic starts the count again
   private var minutes: Double = 60
@@ -60,17 +63,11 @@ final class KeyboardSession {
     try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .allowBluetooth, .defaultToSpeaker])
     try session.setActive(true)
     if !running {
-      let input = engine.inputNode
-      let format = input.outputFormat(forBus: 0)
-      input.removeTap(onBus: 0)
-      input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-        self?.received(buffer)
-      }
-      engine.prepare()
-      try engine.start()
+      try startEngine()
       running = true
     }
     observeKeyboard()
+    observeAudio()
     self.minutes = max(1, minutes)
     until = Date().addingTimeInterval(self.minutes * 60)
     heartbeat?.invalidate()
@@ -84,6 +81,63 @@ final class KeyboardSession {
     }
     writeStatus()
     onState?(state)
+  }
+
+  /// The microphone into the engine, and the engine running. Also the way back after an interruption.
+  private func startEngine() throws {
+    let input = engine.inputNode
+    let format = input.outputFormat(forBus: 0)
+    input.removeTap(onBus: 0)
+    input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+      self?.received(buffer)
+    }
+    engine.prepare()
+    try engine.start()
+  }
+
+  // MARK: Keeping it going (T-0178, point 3)
+
+  /// A phone call, Siri, an alarm, another app taking the audio, headphones in or out: iOS stops the engine
+  /// and tells us. Without this the session looked alive (the beat went on) and nothing was heard.
+  private func observeAudio() {
+    guard !observingAudio else { return }
+    observingAudio = true
+    let center = NotificationCenter.default
+    center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+      guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt else { return }
+      if SessionRecovery.shouldRestart(interruptionTypeRaw: raw) { self?.restartEngine() }
+    }
+    center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+      self?.restartEngine()
+    }
+    center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.restartEngine()
+    }
+  }
+
+  /// Starts the engine again when the session is meant to be on. A try that fails is tried again after a
+  /// growing wait; after six the session is ended, which the keyboard sees, so its mic asks the app to start one.
+  private func restartEngine() {
+    guard running, until > Date() else { return }
+    do {
+      try AVAudioSession.sharedInstance().setActive(true)
+      if !engine.isRunning { try startEngine() }
+      restartAttempt = 0
+      writeStatus()
+    } catch {
+      guard !restartScheduled else { return }
+      guard let wait = SessionRecovery.retryDelay(attempt: restartAttempt) else {
+        restartAttempt = 0
+        end()
+        return
+      }
+      restartAttempt += 1
+      restartScheduled = true
+      DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+        self?.restartScheduled = false
+        self?.restartEngine()
+      }
+    }
   }
 
   func end() {

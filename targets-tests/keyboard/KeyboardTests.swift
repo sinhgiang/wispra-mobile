@@ -132,6 +132,13 @@ struct KeyboardTests {
     check("minutes left", SessionStatus.minutesLeft(untilMs: now + 14 * 60_000 + 1, nowMs: now) == 15)
   }
 
+  static func recovery() {
+    check("restarts when an interruption ends", SessionRecovery.shouldRestart(interruptionTypeRaw: SessionRecovery.interruptionEnded))
+    check("waits while the interruption goes on", !SessionRecovery.shouldRestart(interruptionTypeRaw: SessionRecovery.interruptionBegan))
+    check("retries after 2, 4, 8, 16, 30 and 30 seconds", (0..<6).compactMap { SessionRecovery.retryDelay(attempt: $0) } == [2, 4, 8, 16, 30, 30])
+    check("gives up after six tries", SessionRecovery.retryDelay(attempt: 6) == nil && SessionRecovery.retryDelay(attempt: -1) == nil)
+  }
+
   static func main() {
     telex()
     layout()
@@ -139,6 +146,7 @@ struct KeyboardTests {
     segmenter()
     chunks()
     session()
+    recovery()
     print("\(passed)/\(passed + failed) passed")
     if failed > 0 { exit(1) }
   }

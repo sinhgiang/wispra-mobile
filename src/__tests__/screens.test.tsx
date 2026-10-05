@@ -13,6 +13,7 @@ let mockSetup: SetupState;
 const mockSaveMinutes = jest.fn();
 let mockSavedLanguage = 'vi';
 const mockLanguageSaves: string[] = [];
+const mockSessionEnded: boolean[] = [];
 const mockNativeLanguage: string[] = [];
 const mockStartSession = jest.fn(async (minutes: number) => ({ active: true, until: Date.now() + minutes * 60_000, listening: false }));
 
@@ -28,6 +29,7 @@ jest.mock('@/lib/entries-store', () => ({
 }));
 jest.mock('@/lib/storage', () => ({
   loadSessionMinutes: () => 60,
+  setSessionEndedByUser: (ended: boolean) => mockSessionEnded.push(ended),
   saveSessionMinutes: (m: number) => mockSaveMinutes(m),
   audioExists: () => true,
   loadTranscribeLanguage: () => mockSavedLanguage,
@@ -58,7 +60,7 @@ import KeyboardSessionScreen from '@/app/keyboard-session';
 // eslint-disable-next-line import/first
 import WelcomeScreen from '@/app/welcome';
 // eslint-disable-next-line import/first
-import { SPEAK_FLOW } from '@/lib/keyboard-session';
+import { SESSION_LIMITS_NOTE, SPEAK_FLOW } from '@/lib/keyboard-session';
 // eslint-disable-next-line import/first
 import { MindMapView, SeekBar, TabChips } from '@/components/wispra/meeting-views';
 
@@ -70,6 +72,7 @@ beforeEach(() => {
   mockSaveMinutes.mockClear();
   mockSavedLanguage = 'vi';
   mockLanguageSaves.length = 0;
+  mockSessionEnded.length = 0;
   mockNativeLanguage.length = 0;
   mockStartSession.mockClear();
   mockSetup = iphone;
@@ -119,6 +122,14 @@ describe('the listening session the keyboard mic opens (T-0163)', () => {
     await render(<KeyboardSessionScreen />);
     expect(mockStartSession.mock.calls).toEqual([[60]]);
     for (const choice of [/^5 min$/, /^15 min$/, /^1 hour$/, /Session length/]) expect(screen.queryByText(choice)).toBeNull();
+    // The user did not end it: starting one clears a mark left by an earlier End session
+    expect(mockSessionEnded).toEqual([false]);
+  });
+
+  it('End session stays ended: Wispra does not start it by itself again until the keyboard asks', async () => {
+    await render(<KeyboardSessionScreen />);
+    await fireEvent.press(await screen.findByText('End session'));
+    expect(mockSessionEnded[mockSessionEnded.length - 1]).toBe(true);
   });
 
   it('says first how to go back to the app being typed in', async () => {
@@ -134,10 +145,10 @@ describe('the listening session the keyboard mic opens (T-0163)', () => {
     await render(<AccountScreen />);
     await fireEvent.press(screen.getByText('Listening session'));
     const buttons = (alert.mock.calls[0]?.[2] ?? []) as { text?: string; onPress?: () => void }[];
-    expect(buttons.map((b) => b.text)).toEqual(['15 min', '1 hour', '4 hours', 'Cancel']);
+    expect(buttons.map((b) => b.text)).toEqual(['1 hour', '4 hours', '12 hours', 'Cancel']);
     await act(async () => buttons[2].onPress?.());
-    expect(mockSaveMinutes).toHaveBeenCalledWith(240);
-    expect(await screen.findByText('4 hours')).toBeTruthy();
+    expect(mockSaveMinutes).toHaveBeenCalledWith(720);
+    expect(await screen.findByText('12 hours')).toBeTruthy();
   });
 
   it('has no listening session row on Android (its keyboard uses the microphone itself)', async () => {
@@ -257,5 +268,24 @@ describe('the first-run guide describes the mic flow the keyboard really has (T-
     await view.unmount();
     await render(<WelcomeScreen />);
     expect(screen.getByText(/Then tap the purple mic/)).toBeTruthy();
+  });
+});
+
+describe('what iOS does not allow is said plainly (T-0178, point 3)', () => {
+  it('the guide and Account both say when Wispra has to open for the mic, and that it starts a session by itself', async () => {
+    const view = await render(<WelcomeScreen />);
+    expect(screen.getByText(SESSION_LIMITS_NOTE, { exact: false })).toBeTruthy();
+    expect(SESSION_LIMITS_NOTE).toMatch(/Apple lets only the app start the microphone/);
+    expect(SESSION_LIMITS_NOTE).toMatch(/after you end the session/);
+    expect(SESSION_LIMITS_NOTE).toMatch(/after the iPhone restarts/);
+    await view.unmount();
+    await render(<AccountScreen />);
+    expect(screen.getByText(SESSION_LIMITS_NOTE, { exact: false })).toBeTruthy();
+  });
+
+  it('Account on Android does not talk about a listening session', async () => {
+    mockSetup = android;
+    await render(<AccountScreen />);
+    expect(screen.queryByText(SESSION_LIMITS_NOTE, { exact: false })).toBeNull();
   });
 });

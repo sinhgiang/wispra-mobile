@@ -128,6 +128,19 @@ export function saveTranscribeLanguage(language: TranscribeLanguage): void {
   file.write(language);
 }
 
+// The user ended the listening session on its screen: it is not started by itself again until the
+// keyboard's mic asks for one (T-0178)
+export function sessionEndedByUser(): boolean {
+  return new File(root, 'session-ended-by-user').exists;
+}
+
+export function setSessionEndedByUser(ended: boolean): void {
+  ensureDirs();
+  const file = new File(root, 'session-ended-by-user');
+  if (ended && !file.exists) file.create();
+  if (!ended && file.exists) file.delete();
+}
+
 // How long the keyboard's listening session lasts (iPhone), chosen in Account
 export function loadSessionMinutes(): number {
   const file = new File(root, 'session-minutes');

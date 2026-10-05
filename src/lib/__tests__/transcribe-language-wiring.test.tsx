@@ -36,6 +36,8 @@ jest.mock('../storage', () => ({
   loadTranscribeLanguage: () => (jest.requireActual('../transcribe-language') as typeof import('../transcribe-language')).parseTranscribeLanguage(mockSaved),
 }));
 jest.mock('../cloud-auth', () => ({ currentSession: () => ({ email: 'a@b.c' }), validToken: async () => 'tok' }));
+// The punctuation step asks Wispra Cloud's chat: never for real here
+jest.mock('@/lib/ai', () => ({ chatJson: async () => Promise.reject(new Error('no network in tests')) }));
 jest.mock('../entries-store', () => ({ useEntries: () => ({ cloudAllowed: () => true }) }));
 jest.mock('@/modules/wispra-keyboard-bridge', () => ({
   onSessionChunk: (listener: (chunk: unknown) => void) => {
