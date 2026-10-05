@@ -75,6 +75,17 @@ export async function endSession(): Promise<SessionState> {
   return native ? native.endSession() : OFF;
 }
 
+// Before Wispra records in the app (a dictation, a meeting): a keyboard listening session holds the
+// microphone and the audio session, so it ends first
+export async function endSessionBeforeRecording(): Promise<void> {
+  if (!native) return;
+  try {
+    if ((await native.sessionState()).active) await native.endSession();
+  } catch {
+    // Nothing running, or the module is missing: recording goes on
+  }
+}
+
 export async function sessionState(): Promise<SessionState> {
   return native ? native.sessionState() : OFF;
 }

@@ -13,6 +13,7 @@ import { Platform } from 'react-native';
 import { createEntry, type EntryKind } from './entries';
 import { useEntries } from './entries-store';
 import { keepAudio } from './storage';
+import { endSessionBeforeRecording } from '@/modules/wispra-keyboard-bridge';
 
 // Speech, not music: mono AAC at 16 kHz and 32 kbps is about 14 MB an hour, small enough to send
 // for transcription. Written straight into the document directory, which the system never clears.
@@ -60,6 +61,8 @@ export function useRecording(kind: EntryKind) {
       }
       // Meetings keep recording with the screen locked; Android shows a notification while it does
       if (kind === 'meeting' && Platform.OS === 'android') await requestNotificationPermissionsAsync();
+      // iPhone: a keyboard listening session would share the microphone; it ends first
+      await endSessionBeforeRecording();
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, allowsBackgroundRecording: kind === 'meeting' });
       await recorder.prepareToRecordAsync();
       recorder.record();

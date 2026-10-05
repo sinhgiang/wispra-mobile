@@ -14,6 +14,7 @@ import { useEntries } from './entries-store';
 import { needsSplit, shouldStartNextSegment } from './meeting';
 import { keepAudio } from './storage';
 import { SPEECH_RECORDING } from './use-recording';
+import { endSessionBeforeRecording } from '@/modules/wispra-keyboard-bridge';
 
 // The meeting's pieces use the speech format of every recording, plus the input level, used to
 // start the next piece at a quiet moment
@@ -143,6 +144,8 @@ export function useMeetingRecording() {
       }
       // Android shows a notification while the meeting records with the screen locked
       if (Platform.OS === 'android') await requestNotificationPermissionsAsync();
+      // iPhone: a keyboard listening session would share the microphone; it ends first
+      await endSessionBeforeRecording();
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, allowsBackgroundRecording: true });
       const entry = { ...createEntry('meeting'), segments: [] };
       add(entry);
