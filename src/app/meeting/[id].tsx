@@ -6,12 +6,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { confirmDelete } from '@/components/wispra/confirm-delete';
 import { PendingCard } from '@/components/wispra/entry-card';
 import { ActionList, MeetingPlayer, MindMapView, SummaryText, TabChips } from '@/components/wispra/meeting-views';
-import { Body, Button, Card, ui } from '@/components/wispra/ui';
+import { Body, Button, Card, Chip, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { formatDate, formatDuration, meetingLines, needsTranscription, type Entry } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
 import { deleteOneWarning } from '@/lib/history-delete';
-import { formatClock } from '@/lib/meeting';
+import { formatClock, readableText } from '@/lib/meeting';
+import { PLATFORMS, type ContentPlatform } from '@/lib/meeting-content';
 import { useSession } from '@/lib/use-session';
 
 type Tab = 'summary' | 'transcript' | 'mindmap' | 'post';
@@ -144,6 +145,10 @@ function SummaryTab({ entry, working }: { entry: Entry; working: boolean }) {
         <Card>
           <Text style={styles.section}>Summary</Text>
           <SummaryText text={notes.summary} />
+          {/* Notes written before a fix (English headings, garbled words) can be written again */}
+          <View style={ui.row}>
+            <Button small label={working ? 'Writing…' : 'Write again'} disabled={working} onPress={() => void makeNotes(entry.id)} />
+          </View>
         </Card>
       ) : !hasText ? (
         <NeedsText entry={entry} />
@@ -195,13 +200,15 @@ function TranscriptTab({ entry, onPlay }: { entry: Entry; onPlay: (ms: number) =
     );
   }
   if (pieces.every((p) => !p.text)) return <NeedsText entry={entry} />;
+  // Garbled runs saved before the filter are left out here too (T-0164)
+  const words = (text: string | null) => readableText(text);
   return (
     <Card>
       {pieces.map((p) => (
         <Pressable key={p.id} accessibilityRole="button" accessibilityHint="Plays from here" onPress={() => onPlay(p.startMs)} style={styles.line}>
           <Text style={styles.time}>{formatClock(p.startMs)}</Text>
-          {p.text ? (
-            <Text style={styles.text}>{p.text}</Text>
+          {words(p.text) ? (
+            <Text style={styles.text}>{words(p.text)}</Text>
           ) : (
             <Text style={styles.waiting}>{p.status === 'failed' ? 'Could not transcribe this part; the audio is kept.' : p.status === 'done' ? '(nothing said)' : 'Not transcribed yet'}</Text>
           )}
@@ -237,26 +244,64 @@ function MindMapTab({ entry, working }: { entry: Entry; working: boolean }) {
   );
 }
 
+// Posts as on the computer (T-0164): a website article, and three versions of a post for each social
+// platform, each written the first time it is asked for
 function PostTab({ entry, working }: { entry: Entry; working: boolean }) {
-  const { makePostFor } = useEntries();
+  const { makeContentFor } = useEntries();
+  const [platform, setPlatform] = useState<ContentPlatform>('facebook');
+  const [version, setVersion] = useState(0);
   if (meetingLines(entry).length === 0) return <NeedsText entry={entry} />;
-  const post = entry.notes?.post;
+  const info = PLATFORMS.find((p) => p.value === platform) ?? PLATFORMS[1];
+  const content = entry.notes?.content?.[platform];
+  const posts = content?.posts ?? [];
+  const shown = posts[Math.min(version, posts.length - 1)] ?? '';
+  const make = () => void makeContentFor(entry.id, platform);
+  const shareText = platform === 'website' ? [content?.title, content?.metaDescription, content?.body].filter(Boolean).join('\n\n') : shown;
+  const choose = (next: ContentPlatform) => {
+    setPlatform(next);
+    setVersion(0);
+  };
+
   return (
     <>
-      <NotesError entry={entry} onRetry={() => void makePostFor(entry.id)} />
-      {post ? (
+      <View style={styles.platforms}>
+        {PLATFORMS.map((p) => (
+          <Chip key={p.value} label={p.label} active={platform === p.value} onPress={() => choose(p.value)} />
+        ))}
+      </View>
+      <NotesError entry={entry} onRetry={make} />
+      {content ? (
         <Card>
-          <Text style={styles.text}>{post}</Text>
+          {platform === 'website' ? (
+            <>
+              <Text style={styles.section}>{`SEO title (${content.title?.length ?? 0} chars)`}</Text>
+              <Text selectable style={styles.seoTitle}>{content.title}</Text>
+              <Text style={styles.section}>{`Meta description (${content.metaDescription?.length ?? 0} chars)`}</Text>
+              <Text selectable style={styles.text}>{content.metaDescription}</Text>
+              <SummaryText text={content.body ?? ''} />
+            </>
+          ) : (
+            <>
+              <View style={styles.versions}>
+                {posts.map((_, i) => (
+                  <Chip key={i} label={`Version ${i + 1}`} active={Math.min(version, posts.length - 1) === i} onPress={() => setVersion(i)} />
+                ))}
+              </View>
+              <Text selectable style={styles.text}>
+                {shown}
+              </Text>
+            </>
+          )}
           <View style={ui.row}>
-            <Button small kind="primary" label="Share" onPress={() => void Share.share({ message: post })} />
-            <Button small label={working ? 'Writing…' : 'Write it again'} disabled={working} onPress={() => void makePostFor(entry.id)} />
+            <Button small kind="primary" label={info.share} onPress={() => void Share.share({ message: shareText })} />
+            <Button small label={working ? 'Writing…' : 'Write again'} disabled={working} onPress={make} />
           </View>
         </Card>
       ) : (
         <Card>
-          <Body style={styles.note}>A ready-to-post write-up for LinkedIn or Facebook, from what was said. Check it before you share it.</Body>
+          <Body style={styles.note}>{info.about} Check it before you share it.</Body>
           <View style={ui.row}>
-            <Button small kind="primary" label={working ? 'Writing the post…' : 'Write a post'} disabled={working} onPress={() => void makePostFor(entry.id)} />
+            <Button small kind="primary" label={working ? 'Writing…' : info.create} disabled={working} onPress={make} />
           </View>
         </Card>
       )}
@@ -323,4 +368,7 @@ const styles = StyleSheet.create({
   sendText: { color: '#ffffff', fontSize: 18 },
   missing: { padding: Gap.xl, gap: Gap.l, justifyContent: 'center' },
   cardTitle: { color: W.text, fontSize: 15, fontWeight: '600' },
+  platforms: { flexDirection: 'row', flexWrap: 'wrap', gap: Gap.s },
+  versions: { flexDirection: 'row', flexWrap: 'wrap', gap: Gap.s },
+  seoTitle: { color: W.text, fontSize: 16, fontWeight: '700', lineHeight: 22 },
 });

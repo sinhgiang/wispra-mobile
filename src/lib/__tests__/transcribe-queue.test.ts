@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { createEntry, type Entry } from '../entries';
 import type { MeetingSegment } from '../meeting';
-import { emptyAudio, freeName, jobKey, nextJob, runQueue, type Job, type JobOutcome, type QueueRules } from '../transcribe-queue';
+import { emptyAudio, freeName, jobKey, nextJob, runQueue, TRANSCRIBE_CONCURRENCY, type Job, type JobOutcome, type QueueRules } from '../transcribe-queue';
 
 const rules: QueueRules = {
   readyToFinish: (e) => !!e.segments && e.status === 'pending' && !e.segments.some((s) => s.status === 'pending' || s.status === 'recording'),
@@ -124,5 +124,54 @@ describe('audio files', () => {
     let n = 0;
     expect(freeName('recording-B.m4a', (c) => taken.has(c), () => String(++n))).toBe('recording-B.m4a');
     expect(freeName('recording-A.m4a', (c) => taken.has(c), () => String(++n))).toBe('recording-A-2.m4a');
+  });
+});
+
+describe('several transcriptions at once (T-0164: the words came slowly)', () => {
+  // The owner's meeting of 11:33: 24 pieces waiting at once
+  const pieces = Array.from({ length: 24 }, (_, i) => piece(`p${i}`, i * 30_000));
+  const meeting: Entry = { ...createEntry('meeting', new Date('2026-10-05T04:33:00Z'), 'mobile-m'), status: 'pending', segments: pieces };
+
+  function store(latencyMs: number) {
+    let entries: Entry[] = [meeting];
+    let running = 0;
+    let most = 0;
+    const finishedWhileRunning: number[] = [];
+    const run = async (job: Job): Promise<JobOutcome> => {
+      running++;
+      most = Math.max(most, running);
+      if (job.kind === 'finish-meeting') finishedWhileRunning.push(running);
+      await new Promise((resolve) => setTimeout(resolve, job.kind === 'transcribe-piece' ? latencyMs : 1));
+      running--;
+      entries = entries.map((e) => {
+        if (job.kind === 'transcribe-piece') return { ...e, segments: e.segments!.map((s) => (s.id === job.piece.id ? { ...s, status: 'done' as const, text: 'x' } : s)) };
+        return { ...e, status: 'done' as const };
+      });
+      return 'done';
+    };
+    return { opts: { allowed: () => true, pick: (skip: ReadonlySet<string>) => nextJob(entries, skip, rules), run }, most: () => most, finishedWhileRunning };
+  }
+
+  it('sends up to three pieces at once, and finishes the meeting alone once they are all back', async () => {
+    const s = store(15);
+    const ran = await runQueue({ ...s.opts, concurrency: TRANSCRIBE_CONCURRENCY });
+    expect(TRANSCRIBE_CONCURRENCY).toBe(3);
+    expect(s.most()).toBe(3);
+    expect(ran).toHaveLength(25);
+    expect(ran[ran.length - 1]).toBe('mobile-m:finish-meeting');
+    expect(s.finishedWhileRunning).toEqual([1]);
+  });
+
+  it('measured with each piece taking the same time: about three times faster than one by one', async () => {
+    const one = store(40);
+    let t = Date.now();
+    await runQueue({ ...one.opts, concurrency: 1 });
+    const sequentialMs = Date.now() - t;
+    const three = store(40);
+    t = Date.now();
+    await runQueue({ ...three.opts, concurrency: 3 });
+    const parallelMs = Date.now() - t;
+    // 24 pieces × 40 ms: about 960 ms one by one, about 320 ms three at a time
+    expect(parallelMs).toBeLessThan(sequentialMs * 0.55);
   });
 });

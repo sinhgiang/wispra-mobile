@@ -120,6 +120,9 @@ jobs:
           MANGLED="_TtC${#MODULE}${MODULE}${#CLASS}${CLASS}"
           echo "Looking for the class $MANGLED"
           nm "$APPEX/$EXE" | grep "OBJC_CLASS_\$_$MANGLED"
+          # The keychain group the app and the keyboard share (T-0163), in both targets' entitlements
+          for f in $(find ios -name "*.entitlements" -not -path "*/Pods/*"); do echo "== $f"; cat "$f"; done
+          test "$(find ios -name '*.entitlements' -not -path '*/Pods/*' -exec grep -l 'com.sinhgiang.wispramobile.shared' {} + | wc -l)" -ge 2
 
       - name: Keep the build log
         if: always()

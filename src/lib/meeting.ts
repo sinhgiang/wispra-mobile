@@ -1,4 +1,7 @@
-// Meetings are recorded in pieces of about half a minute, so each piece can be transcribed while
+import type { ContentPlatform, MeetingContent } from './meeting-content';
+import { filterKnownHallucinations } from './transcript-filter';
+
+// Meetings are recorded in pieces of 12 to 20 seconds, so each piece can be transcribed while
 // the meeting goes on (the live transcript) and long meetings stay under Wispra Cloud's 4 MB limit.
 // Pure functions only, so they can be tested without native modules.
 
@@ -61,15 +64,20 @@ export interface MeetingNotes {
   // How many transcript paragraphs the live outline has seen
   liveRefs?: number;
   mindMap?: MindMap;
+  // The post of earlier builds (one LinkedIn/Facebook text); kept, no longer written
   post?: string;
+  // The website article and the social posts, by platform (T-0164, as on the computer)
+  content?: Partial<Record<ContentPlatform, MeetingContent>>;
   qa?: QaTurn[];
   error?: string;
 }
 
 // ── Cutting the recording into pieces ────────────────────────────────────────────────────────
 
-export const SEGMENT_MIN_MS = 25_000;
-export const SEGMENT_MAX_MS = 40_000;
+// Short pieces, as on the computer (at most 20 s of speech): each is back from Wispra Cloud sooner,
+// so the transcript keeps up with the meeting and the last words after Stop come quickly (T-0164)
+export const SEGMENT_MIN_MS = 12_000;
+export const SEGMENT_MAX_MS = 20_000;
 // Below this level (dBFS from the recorder's metering) the room counts as quiet
 export const QUIET_DB = -40;
 
@@ -125,11 +133,32 @@ export function formatClock(ms: number): string {
 }
 
 // One paragraph per transcribed piece, numbered from 1
+// The language the notes are written in (T-0164). "The same language as the transcript" was not
+// enough: a Vietnamese meeting full of English tech words came back with English headings, topics
+// and tasks. Vietnamese is told apart by its own letters (ă â đ ê ô ơ ư and the tone marks); for
+// anything else the prompts keep "the same language as the transcript".
+const VIETNAMESE_LETTERS = /[ăâđêôơưàáạảãầấậẩẫằắặẳẵèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]/giu;
+
+export function meetingLanguage(text: string): 'Vietnamese' | null {
+  const letters = text.match(/\p{L}/gu)?.length ?? 0;
+  if (letters < 20) return null;
+  const vietnamese = text.normalize('NFC').match(VIETNAMESE_LETTERS)?.length ?? 0;
+  return vietnamese / letters >= 0.04 ? 'Vietnamese' : null;
+}
+
+// The words of each piece, cleaned again as they are read: pieces transcribed before the bare
+// consonant filter (T-0164) were saved with their garbled runs, and those must not reach the notes
+export function readableText(text: string | null | undefined): string {
+  return text?.trim() ? filterKnownHallucinations(text) : '';
+}
+
 export function transcriptLines(segments: MeetingSegment[]): TranscriptLine[] {
   return [...segments]
     .sort((a, b) => a.startMs - b.startMs)
-    .filter((s) => s.status === 'done' && s.text && s.text.trim())
-    .map((s, i) => ({ ref: i + 1, startMs: s.startMs, text: (s.text ?? '').trim() }));
+    .filter((s) => s.status === 'done')
+    .map((s) => ({ startMs: s.startMs, text: readableText(s.text) }))
+    .filter((l) => l.text)
+    .map((l, i) => ({ ref: i + 1, ...l }));
 }
 
 export function formatLine(line: TranscriptLine): string {
@@ -204,6 +233,19 @@ export function locate(segments: MeetingSegment[], ms: number): { index: number;
     if (ms >= sorted[i].startMs) return { index: i, offsetMs: Math.min(ms - sorted[i].startMs, sorted[i].durationMs) };
   }
   return { index: 0, offsetMs: 0 };
+}
+
+// The moment of the meeting under a finger on the seek bar (T-0164): 0 at the left edge, the whole
+// length at the right, to the second
+export function seekPosition(x: number, width: number, totalMs: number): number {
+  if (width <= 0 || totalMs <= 0) return 0;
+  const share = Math.min(1, Math.max(0, x / width));
+  return Math.min(totalMs, Math.round((share * totalMs) / 1000) * 1000);
+}
+
+// How far along the bar a moment is, from 0 to 1
+export function seekShare(ms: number, totalMs: number): number {
+  return totalMs > 0 ? Math.min(1, Math.max(0, ms / totalMs)) : 0;
 }
 
 // ── Reading what the AI answers ──────────────────────────────────────────────────────────────

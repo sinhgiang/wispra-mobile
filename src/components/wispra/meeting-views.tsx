@@ -1,17 +1,17 @@
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { PanResponder, Pressable, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 
 import { Button, Card, Chip, Label } from './ui';
 
 import { Gap, W } from '@/constants/wispra';
 import { formatDuration, type Entry } from '@/lib/entries';
-import { formatClock, type ActionItem, type MindMap, type MindMapItem } from '@/lib/meeting';
+import { formatClock, seekPosition, seekShare, type ActionItem } from '@/lib/meeting';
 import { audioExists } from '@/lib/storage';
 
 export function TabChips<T extends string>({ tabs, value, onChange }: { tabs: { value: T; label: string }[]; value: T; onChange: (v: T) => void }) {
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipBar} contentContainerStyle={styles.chips}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipBar} contentContainerStyle={styles.chips} testID="meeting-tabs">
       {tabs.map((t) => (
         <Chip key={t.value} label={t.label} active={value === t.value} onPress={() => onChange(t.value)} />
       ))}
@@ -67,46 +67,8 @@ export function ActionList({ actions, onToggle }: { actions: ActionItem[]; onTog
   );
 }
 
-function MapBranch({ item, depth }: { item: MindMapItem; depth: number }) {
-  return (
-    <View style={[styles.branch, depth > 0 && styles.branchNested]}>
-      <Text style={[styles.mapLabel, depth === 0 && styles.mapTopic]}>{item.label}</Text>
-      {item.note ? <Text style={styles.mapNote}>{item.note}</Text> : null}
-      {item.points?.map((p, i) => <MapBranch key={`${p.label}-${i}`} item={p} depth={depth + 1} />)}
-    </View>
-  );
-}
-
-// The mind map as a tree that reads top to bottom on a phone: the centre, its topics, and the
-// decisions, action items and open questions
-export function MindMapView({ map }: { map: MindMap }) {
-  const extra: [string, MindMapItem[]][] = [
-    [map.branchLabels.decisions, map.decisions],
-    [map.branchLabels.actions, map.actions],
-    [map.branchLabels.questions, map.questions],
-  ];
-  return (
-    <View style={styles.map}>
-      <View style={styles.centre}>
-        <Text style={styles.centreTitle}>{map.title}</Text>
-        {map.note ? <Text style={styles.centreNote}>{map.note}</Text> : null}
-      </View>
-      {map.topics.map((t, i) => (
-        <MapBranch key={`${t.label}-${i}`} item={t} depth={0} />
-      ))}
-      {extra
-        .filter(([, items]) => items.length > 0)
-        .map(([label, items]) => (
-          <View key={label} style={[styles.branch, styles.extraBranch]}>
-            <Text style={[styles.mapLabel, styles.mapTopic, { color: W.amberSoft }]}>{label}</Text>
-            {items.map((p, i) => (
-              <MapBranch key={`${p.label}-${i}`} item={p} depth={1} />
-            ))}
-          </View>
-        ))}
-    </View>
-  );
-}
+// The mind map, drawn like the computer's (T-0164)
+export { MindMapView } from './mind-map-canvas';
 
 interface Source {
   uri: string;
@@ -167,6 +129,12 @@ export function MeetingPlayer({ entry, seekRequest }: { entry: Entry; seekReques
     load(i, Math.max(0, ms - (sources[i]?.startMs ?? 0)), true);
   };
 
+  // The seek bar: goes to that moment, playing on if it was playing
+  const seek = (ms: number) => {
+    const i = locateIndex(sources, ms);
+    load(i, Math.max(0, ms - (sources[i]?.startMs ?? 0)), status.playing);
+  };
+
   useEffect(() => {
     if (seekRequest) jump(seekRequest.ms);
     // Runs when a new seek is asked for
@@ -192,6 +160,7 @@ export function MeetingPlayer({ entry, seekRequest }: { entry: Entry; seekReques
   return (
     <Card>
       <Label>Recording</Label>
+      <SeekBar positionMs={positionMs} totalMs={totalMs} onSeek={seek} />
       <View style={styles.row}>
         <Button small kind="primary" label={status.playing ? 'Pause' : 'Play'} onPress={toggle} />
         <Text style={styles.note}>
@@ -213,14 +182,69 @@ export function MeetingPlayer({ entry, seekRequest }: { entry: Entry; seekReques
   );
 }
 
+// A bar from the start of the meeting to its end: tap or drag to any moment (T-0164). While the
+// finger is down it shows where it will go; the recording moves there when the finger lifts.
+export function SeekBar({ positionMs, totalMs, onSeek }: { positionMs: number; totalMs: number; onSeek: (ms: number) => void }) {
+  const [width, setWidth] = useState(0);
+  const [dragMs, setDragMs] = useState<number | null>(null);
+  const live = useRef({ width, totalMs, onSeek });
+  live.current = { width, totalMs, onSeek };
+
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: (e) => setDragMs(seekPosition(e.nativeEvent.locationX, live.current.width, live.current.totalMs)),
+        onPanResponderMove: (e) => setDragMs(seekPosition(e.nativeEvent.locationX, live.current.width, live.current.totalMs)),
+        onPanResponderRelease: (e) => {
+          const ms = seekPosition(e.nativeEvent.locationX, live.current.width, live.current.totalMs);
+          setDragMs(null);
+          live.current.onSeek(ms);
+        },
+        onPanResponderTerminate: () => setDragMs(null),
+      }),
+    [],
+  );
+
+  const shown = dragMs ?? positionMs;
+  const share = seekShare(shown, totalMs);
+  return (
+    <View style={styles.seek}>
+      <View
+        {...responder.panHandlers}
+        testID="seek-bar"
+        accessibilityRole="adjustable"
+        accessibilityLabel="Position in the recording"
+        accessibilityValue={{ min: 0, max: Math.round(totalMs / 1000), now: Math.round(shown / 1000), text: formatDuration(shown) }}
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={(e) => onSeek(Math.min(totalMs, Math.max(0, positionMs + (e.nativeEvent.actionName === 'increment' ? 10_000 : -10_000))))}
+        onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
+        style={styles.seekTouch}>
+        <View style={styles.seekTrack} pointerEvents="none">
+          <View style={[styles.seekFill, { width: `${share * 100}%` }]} />
+        </View>
+        <View style={[styles.seekThumb, { left: Math.max(0, share * width - 8) }]} pointerEvents="none" />
+      </View>
+      <View style={styles.seekTimes}>
+        <Text style={styles.note}>{formatDuration(shown)}</Text>
+        <Text style={styles.note}>{formatDuration(totalMs)}</Text>
+      </View>
+    </View>
+  );
+}
+
 function locateIndex(sources: Source[], ms: number): number {
   for (let i = sources.length - 1; i >= 0; i--) if (ms >= sources[i].startMs) return i;
   return 0;
 }
 
 const styles = StyleSheet.create({
-  // A horizontal list takes all the height it can unless told not to grow
-  chipBar: { flexGrow: 0 },
+  // A horizontal list takes all the height it can unless told not to grow, and a ScrollView shrinks by
+  // default: with the ask bar and the keyboard below, the tabs were squeezed and the content slid over
+  // them (T-0164). Fixed height, never shrinks, its own background and a line under it.
+  chipBar: { flexGrow: 0, flexShrink: 0, minHeight: 48, backgroundColor: W.bg, borderBottomWidth: 1, borderBottomColor: W.line, zIndex: 1 },
   chips: { gap: Gap.s, paddingHorizontal: Gap.xl, paddingVertical: Gap.s, alignItems: 'center' },
   summary: { gap: 6 },
   gap: { height: 4 },
@@ -235,19 +259,16 @@ const styles = StyleSheet.create({
   tick: { color: '#ffffff', fontSize: 11, fontWeight: '700' },
   actionText: { flex: 1 },
   doneText: { color: W.muted, textDecorationLine: 'line-through' },
-  map: { gap: Gap.m },
-  centre: { backgroundColor: W.accentDeep, borderRadius: 14, padding: 14, gap: 4 },
-  centreTitle: { color: W.text, fontSize: 16, fontWeight: '700' },
-  centreNote: { color: '#c7d2fe', fontSize: 13, lineHeight: 19 },
-  branch: { borderLeftWidth: 2, borderLeftColor: W.accent, paddingLeft: Gap.m, gap: 4 },
-  branchNested: { borderLeftColor: W.lineStrong, marginLeft: 4, marginTop: 4 },
-  extraBranch: { borderLeftColor: W.amber },
-  mapLabel: { color: W.text, fontSize: 14, fontWeight: '600' },
-  mapTopic: { fontSize: 15, color: W.accentSoft },
-  mapNote: { color: W.muted, fontSize: 13, lineHeight: 19 },
   note: { color: W.muted, fontSize: 13 },
   row: { flexDirection: 'row', alignItems: 'center', gap: Gap.s },
   section: { color: W.accentSoft, fontSize: 13, fontWeight: '600' },
   marks: { gap: 2, marginTop: Gap.xs },
   mark: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  seek: { gap: 4, marginTop: Gap.xs },
+  // Tall enough to catch a finger; the track itself is thin
+  seekTouch: { height: 32, justifyContent: 'center' },
+  seekTrack: { height: 4, borderRadius: 2, backgroundColor: W.line, overflow: 'hidden' },
+  seekFill: { height: '100%', backgroundColor: W.accent },
+  seekThumb: { position: 'absolute', top: 8, width: 16, height: 16, borderRadius: 8, backgroundColor: W.accentSoft },
+  seekTimes: { flexDirection: 'row', justifyContent: 'space-between' },
 });

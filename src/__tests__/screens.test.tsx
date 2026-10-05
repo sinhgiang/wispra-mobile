@@ -23,7 +23,8 @@ jest.mock('@/lib/use-recording', () => ({
 jest.mock('@/lib/entries-store', () => ({
   useEntries: () => ({ entries: [], syncState: { note: null, at: null, waitingDeletes: 0 }, retry: jest.fn(), busy: new Set(), cloudAllowed: () => true }),
 }));
-jest.mock('@/lib/storage', () => ({ loadSessionMinutes: () => 60, saveSessionMinutes: (m: number) => mockSaveMinutes(m) }));
+jest.mock('@/lib/storage', () => ({ loadSessionMinutes: () => 60, saveSessionMinutes: (m: number) => mockSaveMinutes(m), audioExists: () => true }));
+jest.mock('expo-audio', () => ({ useAudioPlayer: () => ({}), useAudioPlayerStatus: () => ({}) }));
 jest.mock('@/modules/wispra-keyboard-bridge', () => ({
   startSession: (m: number) => mockStartSession(m),
   endSession: async () => ({ active: false, until: 0, listening: false }),
@@ -41,6 +42,8 @@ import AccountScreen from '@/app/(tabs)/account';
 import DictateScreen from '@/app/(tabs)/dictate';
 // eslint-disable-next-line import/first
 import KeyboardSessionScreen from '@/app/keyboard-session';
+// eslint-disable-next-line import/first
+import { MindMapView, SeekBar } from '@/components/wispra/meeting-views';
 
 const iphone: SetupState = { platform: 'ios', signedIn: true, keyboard: { enabled: true, lastSeenAt: null }, bubbleOn: false, waiting: 0 };
 const android: SetupState = { platform: 'android', signedIn: true, keyboard: null, bubbleOn: false, waiting: 0 };
@@ -119,5 +122,48 @@ describe('the listening session the keyboard mic opens (T-0163)', () => {
     mockSetup = android;
     await render(<AccountScreen />);
     expect(screen.queryByText('Listening session')).toBeNull();
+  });
+});
+
+describe('the meeting seek bar (T-0164)', () => {
+  it('shows where the recording is and moves 10 seconds at a time for screen readers', async () => {
+    const onSeek = jest.fn();
+    await render(<SeekBar positionMs={65_000} totalMs={693_000} onSeek={onSeek} />);
+    const bar = screen.getByTestId('seek-bar');
+    expect(screen.getByText('1:05')).toBeTruthy();
+    expect(screen.getByText('11:33')).toBeTruthy();
+    await fireEvent(bar, 'accessibilityAction', { nativeEvent: { actionName: 'increment' } });
+    await fireEvent(bar, 'accessibilityAction', { nativeEvent: { actionName: 'decrement' } });
+    expect(onSeek.mock.calls).toEqual([[75_000], [55_000]]);
+  });
+});
+
+describe('the mind map, drawn like the computer’s (T-0164)', () => {
+  const map = {
+    title: 'Bảo mật web và AI',
+    topics: [{ label: 'Phân tích bảo mật', points: [{ label: 'Lộ API SuperPay' }, { label: 'Thiếu captcha' }] }, { label: 'AI quét lỗ hổng' }],
+    decisions: [],
+    actions: [{ label: 'Gửi NDA' }],
+    questions: [],
+    branchLabels: { decisions: 'Quyết định', actions: 'Việc cần làm', questions: 'Câu hỏi còn mở' },
+  };
+
+  it('draws the centre and the main branches, then every level on All', async () => {
+    await render(<MindMapView map={map} />);
+    expect(screen.getByTestId('map-node-Bảo mật web và AI')).toBeTruthy();
+    expect(screen.getByTestId('map-node-Việc cần làm')).toBeTruthy();
+    expect(screen.queryByTestId('map-node-Lộ API SuperPay')).toBeNull();
+    await fireEvent.press(screen.getByText('All'));
+    expect(screen.getByTestId('map-node-Lộ API SuperPay')).toBeTruthy();
+    expect(screen.getByTestId('map-node-Gửi NDA')).toBeTruthy();
+  });
+
+  it('opens a branch from its circle, which says how many it holds', async () => {
+    await render(<MindMapView map={map} />);
+    expect(screen.queryByTestId('map-node-Thiếu captcha')).toBeNull();
+    const circle = screen.getByTestId('map-toggle-Phân tích bảo mật');
+    expect(circle.props.accessibilityLabel).toBe('Open Phân tích bảo mật (2)');
+    await fireEvent.press(circle);
+    expect(screen.getByTestId('map-node-Thiếu captcha')).toBeTruthy();
   });
 });

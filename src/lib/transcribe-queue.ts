@@ -59,32 +59,61 @@ export function nextJob(entries: Entry[], skip: ReadonlySet<string>, rules: Queu
 // server busy), so it is left alone for the rest of this run
 export type JobOutcome = 'done' | 'later';
 
+// Transcriptions are sent several at a time (T-0164: the words came slowly, one piece after the
+// other); the computer sends every piece as soon as it is cut. Finishing a meeting, writing notes and
+// cutting a piece change the list the others are picked from, so they run alone.
+export const TRANSCRIBE_CONCURRENCY = 3;
+
+function runsInParallel(job: Job): boolean {
+  return job.kind === 'transcribe-piece' || job.kind === 'transcribe-entry';
+}
+
 // The queue's loop, as the app runs it. Before each job it checks that Wispra Cloud may still be
-// used (another account may have signed in meanwhile). A job that failed for a passing reason is
-// skipped for the rest of the run, and so is a job that comes back right after it ran (it changed
+// used (another account may have signed in meanwhile). Up to `concurrency` transcriptions run at
+// once; any other job waits for them and runs alone. A job that failed for a passing reason is
+// skipped for the rest of the run, and so is a job picked again after it was done (it changed
 // nothing, as a meeting that cannot be finished or a piece that cannot be cut), so the loop always
-// ends. Returns the jobs it ran, in order.
+// ends. Returns the jobs it ran, in the order they finished.
 export async function runQueue(opts: {
   allowed: () => boolean;
   pick: (skip: ReadonlySet<string>) => Job | null;
   run: (job: Job) => Promise<JobOutcome>;
+  concurrency?: number;
 }): Promise<string[]> {
+  const limit = Math.max(1, opts.concurrency ?? 1);
   const skip = new Set<string>();
+  const done = new Set<string>();
   const ran: string[] = [];
-  let last: string | null = null;
-  while (opts.allowed()) {
-    const job = opts.pick(skip);
-    if (!job) break;
-    const key = jobKey(job);
-    if (key === last) {
-      skip.add(key);
-      last = null;
-      continue;
+  const inFlight = new Map<string, Promise<void>>();
+  let alone = false;
+
+  for (;;) {
+    while (!alone && inFlight.size < limit && opts.allowed()) {
+      const job = opts.pick(new Set([...skip, ...inFlight.keys()]));
+      if (!job) break;
+      const key = jobKey(job);
+      if (done.has(key)) {
+        skip.add(key);
+        continue;
+      }
+      // Not a transcription: it waits until the running ones are back, then runs on its own
+      if (!runsInParallel(job) && inFlight.size > 0) break;
+      alone = !runsInParallel(job);
+      const task = opts
+        .run(job)
+        .then((outcome) => {
+          ran.push(key);
+          if (outcome === 'later') skip.add(key);
+          else done.add(key);
+        })
+        .finally(() => {
+          inFlight.delete(key);
+          if (!runsInParallel(job)) alone = false;
+        });
+      inFlight.set(key, task);
     }
-    const outcome = await opts.run(job);
-    ran.push(key);
-    if (outcome === 'later') skip.add(key);
-    last = key;
+    if (inFlight.size === 0) break;
+    await Promise.race(inFlight.values());
   }
   return ran;
 }

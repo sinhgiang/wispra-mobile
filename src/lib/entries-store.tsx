@@ -16,7 +16,7 @@ import {
 } from './account-switch';
 import { currentSession, subscribe as onSignInChange } from './cloud-auth';
 import { commitWithRollback } from './cloud-gate';
-import { nextJob, runQueue, type Job, type JobOutcome } from './transcribe-queue';
+import { nextJob, runQueue, TRANSCRIBE_CONCURRENCY, type Job, type JobOutcome } from './transcribe-queue';
 import { File } from 'expo-file-system';
 
 import { defaultMeetingTitle, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
@@ -30,7 +30,8 @@ import {
   type MeetingSegment,
 } from './meeting';
 import { canSplitAudio, splitAudio } from '@/modules/wispra-dictation';
-import { askMeeting, makeMindMap, makeOutline, makePost } from './meeting-ai';
+import { askMeeting, makeMindMap, makeOutline } from './meeting-ai';
+import { makeContent, type ContentPlatform } from './meeting-content';
 import { AccountChanged, CloudUnavailable, deleteAllHistory, deleteHistoryEntry, mergeHistory, readHistory } from './cloud-history';
 import { deleteEverything, queueDeletion, syncDeletes, type DeleteSyncCloud, type DeleteSyncStore } from './delete-sync';
 import { EMPTY_BOOK, stateOf, withState, type DeletionBook, type PendingDeletes } from './history-delete';
@@ -87,7 +88,8 @@ interface EntriesApi {
   // AI notes for a meeting: the summary and outline, the mind map, the post, a question
   makeNotes(id: string): Promise<void>;
   makeMindMapFor(id: string): Promise<void>;
-  makePostFor(id: string): Promise<void>;
+  // A website article or three social posts, written on demand (T-0164)
+  makeContentFor(id: string, platform: ContentPlatform): Promise<void>;
   ask(id: string, question: string): Promise<void>;
   // Signed in with another account than the one whose data is on this phone: what the user must
   // choose before anything is synced (null when there is nothing to choose)
@@ -464,10 +466,17 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   }, [commit, deleteStore]);
   syncRef.current = syncHistory;
 
+  // Counted: several pieces of one meeting are transcribed at once (T-0164), and the first one back
+  // must not mark the meeting idle while the others are still on their way
+  const busyCount = useRef(new Map<string, number>());
   const mark = useCallback((id: string, on: boolean) => {
+    const count = Math.max(0, (busyCount.current.get(id) ?? 0) + (on ? 1 : -1));
+    if (count > 0) busyCount.current.set(id, count);
+    else busyCount.current.delete(id);
     setBusy((prev) => {
+      if (prev.has(id) === count > 0) return prev;
       const next = new Set(prev);
-      if (on) next.add(id);
+      if (count > 0) next.add(id);
       else next.delete(id);
       return next;
     });
@@ -586,6 +595,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
             needsSplit: (piece) => needsSplit(piece) && canSplitAudio,
           }),
         run: runJob,
+        concurrency: TRANSCRIBE_CONCURRENCY,
       });
     } finally {
       running.current = false;
@@ -671,13 +681,16 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     [updateNotes, userNotes],
   );
 
-  const makePostFor = useCallback(
-    (id: string) =>
+  const makeContentFor = useCallback(
+    (id: string, platform: ContentPlatform) =>
       userNotes(id, async () => {
         const entry = current.current.find((e) => e.id === id);
         if (!entry) return;
         updateNotes(id, { error: undefined });
-        updateNotes(id, { post: await makePost(meetingLines(entry), entry.notes?.summary) });
+        const made = await makeContent(meetingLines(entry), platform);
+        // Read again after the wait: another platform may have been written meanwhile
+        const latest = current.current.find((e) => e.id === id);
+        updateNotes(id, { content: { ...(latest?.notes?.content ?? {}), [platform]: made } });
       }),
     [updateNotes, userNotes],
   );
@@ -806,13 +819,13 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       syncState,
       makeNotes: makeNotesByUser,
       makeMindMapFor,
-      makePostFor,
+      makeContentFor,
       ask,
       accountChoice,
       chooseAccount,
       cloudAllowed,
     }),
-    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, removeAll, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makePostFor, ask, accountChoice, chooseAccount, cloudAllowed],
+    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, removeAll, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makeContentFor, ask, accountChoice, chooseAccount, cloudAllowed],
   );
   return <EntriesContext.Provider value={api}>{children}</EntriesContext.Provider>;
 }

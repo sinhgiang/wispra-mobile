@@ -22,7 +22,7 @@ interface ChatMessage {
   content: string;
 }
 
-async function chat(messages: ChatMessage[], maxTokens: number, json: boolean): Promise<string> {
+async function chat(messages: ChatMessage[], maxTokens: number, json: boolean, temperature = 0.2): Promise<string> {
   const token = await validToken();
   if (!token) throw new AiError('Sign in to Wispra Cloud in Account to use AI notes.', true);
   const controller = new AbortController();
@@ -36,7 +36,7 @@ async function chat(messages: ChatMessage[], maxTokens: number, json: boolean): 
         model: MODEL,
         messages,
         max_tokens: maxTokens,
-        temperature: 0.2,
+        temperature,
         ...(json ? { response_format: { type: 'json_object' } } : {}),
       }),
       signal: controller.signal,
@@ -64,7 +64,8 @@ async function chat(messages: ChatMessage[], maxTokens: number, json: boolean): 
   return content;
 }
 
-export async function chatJson(system: string, user: string, maxTokens: number): Promise<unknown> {
+// temperature: 0.2 for notes; the computer writes posts at 0.5 (postprocess.ts)
+export async function chatJson(system: string, user: string, maxTokens: number, temperature = 0.2): Promise<unknown> {
   const answer = await chat(
     [
       { role: 'system', content: system },
@@ -72,6 +73,7 @@ export async function chatJson(system: string, user: string, maxTokens: number):
     ],
     maxTokens,
     true,
+    temperature,
   );
   const value = extractJson(answer);
   if (!value) throw new AiError('Wispra Cloud answered in an unexpected form. Try again.', true);

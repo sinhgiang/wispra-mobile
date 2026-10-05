@@ -14,6 +14,8 @@ import {
   piecesToSegments,
   plainText,
   recoverSegments,
+  seekPosition,
+  seekShare,
   segmentsWaiting,
   shouldStartNextSegment,
   splitLines,
@@ -27,12 +29,12 @@ function seg(over: Partial<MeetingSegment>): MeetingSegment {
 }
 
 describe('cutting the recording into pieces', () => {
-  it('waits for a quiet moment between 25 and 40 seconds', () => {
+  it('waits for a quiet moment between 12 and 20 seconds, as the computer cuts at most 20 s', () => {
     expect(shouldStartNextSegment(10_000, -60)).toBe(false);
-    expect(shouldStartNextSegment(30_000, -20)).toBe(false);
-    expect(shouldStartNextSegment(30_000, -55)).toBe(true);
-    expect(shouldStartNextSegment(30_000, undefined)).toBe(false);
-    expect(shouldStartNextSegment(40_000, -10)).toBe(true);
+    expect(shouldStartNextSegment(15_000, -20)).toBe(false);
+    expect(shouldStartNextSegment(15_000, -55)).toBe(true);
+    expect(shouldStartNextSegment(15_000, undefined)).toBe(false);
+    expect(shouldStartNextSegment(20_000, -10)).toBe(true);
   });
 });
 
@@ -172,5 +174,24 @@ describe('a meeting once its pieces are through (T-0154 review)', () => {
     expect(finishedMeeting([seg({ text: 'Chào cả nhà' }), seg({ id: 'b', text: '' })])).toEqual({ status: 'done', text: 'Chào cả nhà', error: null });
     expect(finishedMeeting([seg({ text: 'Chào' }), seg({ id: 'b', status: 'failed' })])).toMatchObject({ status: 'failed', error: expect.stringContaining('Try again') });
     expect(finishedMeeting([seg({ status: 'pending' })])).toEqual({ status: 'pending', text: null, error: null });
+  });
+});
+
+describe('the seek bar (T-0164)', () => {
+  it('goes from the start to the end of the meeting, to the second', () => {
+    const total = 11 * 60_000 + 33_000; // 11:33, the owner's meeting
+    expect(seekPosition(0, 300, total)).toBe(0);
+    expect(seekPosition(300, 300, total)).toBe(total);
+    expect(seekPosition(150, 300, total)).toBe(347_000);
+    expect(seekPosition(-20, 300, total)).toBe(0);
+    expect(seekPosition(999, 300, total)).toBe(total);
+    expect(seekPosition(10, 0, total)).toBe(0);
+  });
+
+  it('shows how far along a moment is', () => {
+    expect(seekShare(0, 1000)).toBe(0);
+    expect(seekShare(250, 1000)).toBe(0.25);
+    expect(seekShare(5000, 1000)).toBe(1);
+    expect(seekShare(10, 0)).toBe(0);
   });
 });
