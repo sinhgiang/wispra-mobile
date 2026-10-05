@@ -55,9 +55,13 @@ jobs:
           xcrun -sdk iphonesimulator swiftc -target arm64-apple-ios16.4-simulator -module-name WispraKeyboard -parse-as-library \
             targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift targets/keyboard/KeyboardViewController.swift \
             targets/keyboard/SharedChannel.swift modules/wispra-keyboard-bridge/ios/KeyboardSession.swift \
-            modules/wispra-keyboard-bridge/ios/Segmenter.swift targets-tests/keyboard-sim/Harness.swift -o "$APP/Harness"
-          # With a keychain group like the app's and the keyboard's, so the shared keychain is tested
-          codesign --force --sign - --entitlements targets-tests/keyboard-sim/Harness.entitlements "$APP"
+            modules/wispra-keyboard-bridge/ios/Segmenter.swift targets-tests/keyboard-sim/Harness.swift \
+            -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker targets-tests/keyboard-sim/Harness.entitlements \
+            -o "$APP/Harness"
+          # With a keychain group like the app's and the keyboard's, so the shared keychain is tested.
+          # On the simulator the entitlements live in the binary (as Xcode does it); a plain ad-hoc
+          # signature then, since signed-in entitlements make the simulator refuse to open the app.
+          codesign --force --sign - "$APP"
           UDID=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
           devices = json.load(sys.stdin)["devices"]
