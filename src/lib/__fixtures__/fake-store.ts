@@ -5,6 +5,7 @@
 
 import type { ChoiceDeps, DataOwner, Owner, SignedIn } from '../account-switch';
 import type { DeleteSyncStore } from '../delete-sync';
+import { commitWithRollback } from '../cloud-gate';
 import type { Entry } from '../entries';
 import { EMPTY_BOOK, parseDeletionBook, serializeDeletionBook, stateOf, withState, type DeletionBook, type PendingDeletes } from '../history-delete';
 import { fakeAuth } from './fake-cloud';
@@ -49,14 +50,16 @@ export class FakeStore implements DeleteSyncStore, ChoiceDeps {
   owner(): Owner {
     return this.dataOwner;
   }
+  // The same helper entries-store uses: the list changes at once, and goes back when the save fails
   saveEntries(list: Entry[]): boolean {
-    if (this.failSaves) {
-      this.log.push('save failed');
-      return false;
-    }
-    this.list = list;
-    this.log.push('saved');
-    return true;
+    return commitWithRollback(
+      { get: () => this.list, set: (l) => (this.list = l) },
+      () => {
+        this.log.push(this.failSaves ? 'save failed' : 'saved');
+        return !this.failSaves;
+      },
+      list,
+    );
   }
   deleteAudio(uri: string): void {
     this.deletedAudio.push(uri);

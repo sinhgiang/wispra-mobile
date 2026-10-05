@@ -15,6 +15,7 @@ import {
   type Owner,
 } from './account-switch';
 import { currentSession, subscribe as onSignInChange } from './cloud-auth';
+import { commitWithRollback, drainQueue } from './cloud-gate';
 import { File } from 'expo-file-system';
 
 import { defaultMeetingTitle, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
@@ -163,9 +164,8 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   );
 
   // Returns whether the list reached the disk
-  const commit = useCallback((next: Entry[]): boolean => {
-    current.current = next;
-    setEntries(next);
+  // Writes the list to the disk; false when it did not get there
+  const persistList = useCallback((next: Entry[]): boolean => {
     if (readFailed.current) return false;
     try {
       saveEntries(next);
@@ -175,6 +175,37 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       return false;
     }
   }, []);
+
+  const commit = useCallback(
+    (next: Entry[]): boolean => {
+      current.current = next;
+      setEntries(next);
+      return persistList(next);
+    },
+    [persistList],
+  );
+
+  // Like commit, but when the save fails the list in memory goes back to what it was (choices that
+  // cannot be undone must not look done when they are not on the disk)
+  const commitOrRollback = useCallback(
+    (next: Entry[]): boolean =>
+      commitWithRollback(
+        {
+          get: () => current.current,
+          set: (list) => {
+            current.current = list;
+            setEntries(list);
+          },
+        },
+        persistList,
+        next,
+      ),
+    [persistList],
+  );
+
+  // Wispra Cloud may be used for this phone's data: signed in, and no account choice waiting.
+  // Checked again before every job of a queue, since the account can change while it runs.
+  const cloudAllowed = useCallback(() => transcriptionAvailable() && syncAllowed(dataOwner.current, currentSession()), []);
 
   // Brings in dictations made with the mic button over other apps (Android) while Wispra was closed
   const importInbox = useCallback(() => {
@@ -543,15 +574,13 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     if (running.current || !transcriptionAvailable() || !syncAllowed(dataOwner.current, currentSession())) return;
     running.current = true;
     try {
-      while (transcriptionAvailable() && (await runNextJob())) {
-        // next job
-      }
+      await drainQueue(cloudAllowed, runNextJob);
     } finally {
       running.current = false;
     }
     // New text is shared with the computer, and the computer's new dictations come in
     await syncHistory();
-  }, [runNextJob, syncHistory]);
+  }, [cloudAllowed, runNextJob, syncHistory]);
 
   const retry = useCallback(
     async (id: string) => {
@@ -600,6 +629,10 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   // Notes asked for by the user (Try again, Mind map, Post, Ask) show their error in place
   const userNotes = useCallback(
     async (id: string, work: () => Promise<void>) => {
+      if (transcriptionAvailable() && !cloudAllowed()) {
+        updateNotes(id, { error: 'Choose how to use the account you signed in with first.' });
+        return;
+      }
       mark(id, true);
       try {
         await work();
@@ -609,7 +642,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
         mark(id, false);
       }
     },
-    [mark, updateNotes],
+    [cloudAllowed, mark, updateNotes],
   );
 
   const makeNotesByUser = useCallback((id: string) => userNotes(id, () => makeNotes(id)), [makeNotes, userNotes]);
@@ -649,13 +682,17 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     [updateNotes, userNotes],
   );
 
+  // account.json could not be written: tried again at the next check, so a later start does not
+  // take the phone's data for unclaimed
+  const ownerUnsaved = useRef(false);
   const saveOwner = useCallback((owner: DataOwner | null) => {
     dataOwner.current = owner;
     if (!owner) return;
     try {
       saveDataOwner(owner);
+      ownerUnsaved.current = false;
     } catch {
-      // Asked again at the next start if it could not be saved
+      ownerUnsaved.current = true;
     }
   }, []);
 
@@ -672,7 +709,8 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     setAccountChoice(null);
     const before = dataOwner.current;
     const next = ownerAfterSignIn(before, session);
-    if (next && next !== 'unknown' && (before === null || before === 'unknown' || next.userId !== before.userId || next.email !== before.email)) saveOwner(next);
+    const changed = before === null || before === 'unknown' || (next !== null && next !== 'unknown' && (next.userId !== before.userId || next.email !== before.email));
+    if (next && next !== 'unknown' && (changed || ownerUnsaved.current)) saveOwner(next);
   }, [saveOwner]);
 
   const chooseAccount = useCallback(
@@ -683,7 +721,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
           session: currentSession,
           owner: () => dataOwner.current,
           entries: () => current.current,
-          saveEntries: commit,
+          saveEntries: commitOrRollback,
           deleteAudio: (uri) => {
             try {
               deleteAudio(uri);
@@ -706,7 +744,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       }
       return result;
     },
-    [checkAccount, commit, saveOwner, setPendingDeletes, transcribeWaiting],
+    [checkAccount, commitOrRollback, saveOwner, setPendingDeletes, transcribeWaiting],
   );
 
   // While the question waits, it follows the entries (a dictation from the mic button, a recording

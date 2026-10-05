@@ -90,7 +90,13 @@ export class FakeCloud {
     if (url.pathname === '/api/history' && method === 'GET') {
       const since = url.searchParams.get('since');
       const deleted = a.marks.filter((m) => !since || m.deletedAt >= since);
-      return json(200, { entries: a.entries, nextBefore: null, deleted, clearedAt: a.clearedAt, serverTime: this.iso() });
+      // Newest first, one page of `limit` (default 100, as the real route), like wispra-web
+      const limit = Number(url.searchParams.get('limit') ?? 100);
+      const before = url.searchParams.get('before');
+      const sorted = [...a.entries].filter((e) => !before || e.createdAt < before).sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1));
+      const page = sorted.slice(0, limit);
+      const nextBefore = sorted.length > limit ? page[page.length - 1].createdAt : null;
+      return json(200, { entries: page, nextBefore, deleted, clearedAt: a.clearedAt, serverTime: this.iso() });
     }
     if (url.pathname === '/api/history/merge' && method === 'POST') {
       const entries = (JSON.parse(body ?? '{}') as { entries?: HistoryEntry[] }).entries ?? [];

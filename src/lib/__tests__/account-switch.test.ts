@@ -195,7 +195,52 @@ describe('choosing, through applyAccountChoice (the path the app runs)', () => {
     expect(applyAccountChoice(bind(store), 'new-only', shown)).toBe('save-failed');
     expect(store.deletedAudio).toEqual([]);
     expect(store.dataOwner).toBe(anna);
-    expect(store.list).toHaveLength(5);
+    // The list in memory went back too (the save changes it first, like the app's commit)
+    expect(store.list.map((e) => e.id)).toEqual(['mobile-shared', 'mobile-unshared', 'pc-1', 'mobile-meeting', 'mobile-recording']);
+    expect(store.log).toEqual(['save failed']);
+  });
+
+  it('Merge: when the list cannot be saved, the ids are not changed in memory either', () => {
+    const shown = annaThenBen();
+    store.failSaves = true;
+    expect(applyAccountChoice(bind(store), 'merge', shown)).toBe('save-failed');
+    expect(store.list.find((e) => e.id === 'pc-1')?.source).toBe('computer');
+    expect(store.dataOwner).toBe(anna);
+  });
+
+  it('Merge into an account whose history is longer than one page: merged entries go up once, nothing is deleted or doubled', async () => {
+    // Ben has 600 dictations in Wispra Cloud, all newer than Anna's
+    server.account('user-b').entries = Array.from({ length: 600 }, (_, i) => ({
+      id: `desk-ben-${i}`,
+      text: `Ben ${i}`,
+      createdAt: new Date(Date.parse('2026-10-05T09:00:00.000Z') + i * 1000).toISOString(),
+    }));
+    const shown = annaThenBen();
+    let n = 0;
+    expect(applyAccountChoice({ ...bind(store), makeId: () => `mobile-new-${++n}` }, 'merge', shown)).toBe('done');
+
+    const syncOnce = async () => {
+      const result = await syncDeletes(store, realCloud, clock);
+      expect(result!.page.complete).toBe(false);
+      const plan = planSync(store.list, result!.page.entries, new Set(), result!.page.complete);
+      const known = new Set(store.list.map((e) => e.id));
+      store.list = [...store.list, ...plan.upserts.filter((e) => !known.has(e.id))];
+      for (const batch of batches(plan.push)) {
+        await mergeHistory(batch.map(toHistoryEntry), 'user-b');
+        const ids = new Set(batch.map((e) => e.id));
+        store.list = store.list.map((e) => (ids.has(e.id) ? { ...e, syncedAt: new Date(server.now).toISOString() } : e));
+      }
+      return plan.push.length;
+    };
+
+    expect(await syncOnce()).toBe(3);
+    expect(await syncOnce()).toBe(0);
+    const ids = server.account('user-b').entries.map((e) => e.id);
+    expect(ids).toHaveLength(603);
+    expect(new Set(ids).size).toBe(603);
+    expect(ids).toEqual(expect.arrayContaining(['mobile-shared', 'mobile-unshared', 'mobile-new-1']));
+    expect(server.account('user-b').marks).toEqual([]);
+    expect(store.list.map((e) => e.id)).toEqual(expect.arrayContaining(['mobile-shared', 'mobile-unshared', 'mobile-new-1', 'mobile-meeting']));
   });
 
   it('refuses when a dictation came in from the mic button after the question was shown', () => {
