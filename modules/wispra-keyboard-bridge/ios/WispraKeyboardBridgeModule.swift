@@ -12,6 +12,33 @@ public class WispraKeyboardBridgeModule: Module {
   public func definition() -> ModuleDefinition {
     Name("WispraKeyboardBridge")
 
+    // The listening session behind the keyboard's mic (KeyboardSession)
+    Events("onChunk", "onSession")
+
+    OnCreate {
+      KeyboardSession.shared.onChunk = { [weak self] info in self?.sendEvent("onChunk", info) }
+      KeyboardSession.shared.onState = { [weak self] state in self?.sendEvent("onSession", state) }
+    }
+
+    AsyncFunction("startSession") { (minutes: Double) -> [String: Any] in
+      try KeyboardSession.shared.start(minutes: minutes)
+      return KeyboardSession.shared.state
+    }.runOnQueue(.main)
+
+    AsyncFunction("endSession") { () -> [String: Any] in
+      KeyboardSession.shared.end()
+      return KeyboardSession.shared.state
+    }.runOnQueue(.main)
+
+    AsyncFunction("sessionState") { () -> [String: Any] in
+      KeyboardSession.shared.state
+    }.runOnQueue(.main)
+
+    // A transcribed piece for the keyboard, typed at the cursor in order
+    AsyncFunction("deliverText") { (utterance: String, index: Int, text: String, last: Bool) -> Bool in
+      KeyboardSession.shared.deliver(utterance: utterance, index: index, text: text, last: last)
+    }.runOnQueue(.main)
+
     // Whether the Wispra keyboard is turned on in Settings (from the list of keyboards iOS keeps,
     // null when it cannot be read), and when it was last on screen (ms since 1970, null: never,
     // or full access is off)

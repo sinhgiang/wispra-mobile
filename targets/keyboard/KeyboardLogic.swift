@@ -73,3 +73,66 @@ enum KeyboardLogic {
     return word
   }
 }
+
+/// One piece of what was said in a listening session, transcribed by the Wispra app and left on the
+/// pasteboard "com.sinhgiang.wispramobile.keyboard.chunks" as a JSON list of
+/// { u: utterance id, i: index in it, text, at: ms since 1970, last: true for its final piece }.
+struct DictationChunk: Equatable {
+  let utterance: String
+  let index: Int
+  let text: String
+  let at: Double
+  let last: Bool
+
+  var key: String { "\(utterance)#\(index)" }
+}
+
+enum ChunkQueue {
+  static func parse(_ json: String?) -> [DictationChunk] {
+    guard let data = json?.data(using: .utf8),
+          let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+    return list.compactMap { item in
+      guard let u = item["u"] as? String, let i = item["i"] as? Int, let text = item["text"] as? String,
+            let at = item["at"] as? Double else { return nil }
+      return DictationChunk(utterance: u, index: i, text: text, at: at, last: item["last"] as? Bool ?? false)
+    }
+  }
+
+  /// The pieces to type now, in order. Within one utterance, pieces go in index order; a piece that
+  /// never came (transcription failed) is skipped once a later one has waited `gapWaitMs`. Pieces
+  /// older than `maxAgeMs` are left alone.
+  static func toType(_ chunks: [DictationChunk], typed: Set<String>, nowMs: Double, maxAgeMs: Double = 15 * 60 * 1000, gapWaitMs: Double = 6000) -> [DictationChunk] {
+    var out: [DictationChunk] = []
+    let fresh = chunks.filter { nowMs - $0.at < maxAgeMs }
+    let utterances = Dictionary(grouping: fresh, by: { $0.utterance })
+    // Utterances in the order they started
+    let order = utterances.keys.sorted { (utterances[$0]?.map { $0.at }.min() ?? 0) < (utterances[$1]?.map { $0.at }.min() ?? 0) }
+    for u in order {
+      let pieces = (utterances[u] ?? []).sorted { $0.index < $1.index }
+      let typedIndices = pieces.filter { typed.contains($0.key) }.map { $0.index }
+      var next = (typedIndices.max() ?? -1) + 1
+      for p in pieces where !typed.contains(p.key) && p.index >= next {
+        if p.index == next || nowMs - p.at >= gapWaitMs {
+          out.append(p)
+          next = p.index + 1
+        } else {
+          break
+        }
+      }
+    }
+    return out
+  }
+}
+
+/// The listening session the Wispra app runs, as it reports it on the pasteboard
+/// "com.sinhgiang.wispramobile.keyboard.session": { until, beat } in ms since 1970
+enum SessionStatus {
+  /// On, and the app wrote recently (it writes every few seconds while the session runs)
+  static func isLive(untilMs: Double, beatMs: Double, nowMs: Double) -> Bool {
+    untilMs > nowMs && nowMs - beatMs < 20_000
+  }
+
+  static func minutesLeft(untilMs: Double, nowMs: Double) -> Int {
+    max(0, Int(((untilMs - nowMs) / 60_000).rounded(.up)))
+  }
+}

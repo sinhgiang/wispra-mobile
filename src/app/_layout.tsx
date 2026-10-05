@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 
 import { W } from '@/constants/wispra';
 import { loadSession } from '@/lib/cloud-auth';
+import { KeyboardSessionBridge } from '@/components/wispra/keyboard-session-bridge';
 import { EntriesProvider, useEntries } from '@/lib/entries-store';
 import { shouldShowGuide } from '@/lib/setup-guide';
 import { guideSeen, markGuideSeen } from '@/lib/storage';
@@ -73,6 +74,7 @@ export default function RootLayout() {
         <HideSplashWhenLoaded />
         <AskAccountChoice />
         <OpenGuideOnce />
+        <KeyboardSessionBridge />
         <StatusBar style="light" />
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: W.bg } }}>
           <Stack.Screen name="(tabs)" />
@@ -80,6 +82,7 @@ export default function RootLayout() {
           <Stack.Screen name="meeting/[id]" />
           <Stack.Screen name="account-switch" options={{ gestureEnabled: false }} />
           <Stack.Screen name="welcome" />
+          <Stack.Screen name="keyboard-session" />
         </Stack>
       </EntriesProvider>
     </ThemeProvider>

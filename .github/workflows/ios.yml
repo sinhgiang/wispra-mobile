@@ -39,7 +39,7 @@ jobs:
       # The keyboard's Telex typing and key logic (Foundation only), as a small test program
       - name: Swift tests of the Wispra keyboard
         run: |
-          swiftc -parse-as-library targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift targets-tests/keyboard/KeyboardTests.swift -o "$RUNNER_TEMP/keyboard-tests"
+          swiftc -parse-as-library targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift modules/wispra-keyboard-bridge/ios/Segmenter.swift targets-tests/keyboard/KeyboardTests.swift -o "$RUNNER_TEMP/keyboard-tests"
           "$RUNNER_TEMP/keyboard-tests"
 
       - name: Install JavaScript dependencies

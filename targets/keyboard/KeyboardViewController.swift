@@ -16,6 +16,10 @@ final class KeyboardViewController: UIInputViewController {
   static let seenPasteboardName = UIPasteboard.Name("com.sinhgiang.wispramobile.keyboard.seen")
   /// Words older than this are not typed any more
   static let maxAgeSeconds: TimeInterval = 15 * 60
+  /// The listening session the Wispra app runs (status) and the pieces it transcribed
+  static let sessionPasteboardName = UIPasteboard.Name("com.sinhgiang.wispramobile.keyboard.session")
+  static let chunksPasteboardName = UIPasteboard.Name("com.sinhgiang.wispramobile.keyboard.chunks")
+  static let notifyPrefix = "com.sinhgiang.wispramobile.dictation"
 
   private enum Shift { case off, once, locked }
 
@@ -43,6 +47,11 @@ final class KeyboardViewController: UIInputViewController {
   private var pollUntil = Date.distantPast
   /// What the keyboard typed last for Wispra, for Undo
   private var lastTyped: String?
+  /// The mic is red: the app is listening for this keyboard
+  private var listening = false
+  /// Pieces already typed (utterance#index), kept across keyboard loads
+  private var typedPieces: [String] = UserDefaults.standard.stringArray(forKey: "typedPieces") ?? []
+  private var observingText = false
 
   private let purple = UIColor(red: 0x63 / 255.0, green: 0x66 / 255.0, blue: 0xF1 / 255.0, alpha: 1)
   private let lavender = UIColor(red: 0xC7 / 255.0, green: 0xC9 / 255.0, blue: 0xFA / 255.0, alpha: 1)
@@ -79,6 +88,7 @@ final class KeyboardViewController: UIInputViewController {
     }
     strip.translatesAutoresizingMaskIntoConstraints = false
     keysView.translatesAutoresizingMaskIntoConstraints = false
+    observeWords()
     view.addSubview(strip)
     view.addSubview(keysView)
 
@@ -116,7 +126,9 @@ final class KeyboardViewController: UIInputViewController {
     updateShiftForContext()
     // Coming back from Wispra: the words may already be waiting, or arrive in a moment
     typeWaitingWords()
+    typeQueuedPieces()
     startPolling(seconds: 60)
+    showSession()
   }
 
   override func viewWillDisappear(_ animated: Bool) {
@@ -124,6 +136,16 @@ final class KeyboardViewController: UIInputViewController {
     pollTimer?.invalidate()
     pollTimer = nil
     stopDeleteRepeat()
+    // The field goes away: what was being said has nowhere to go
+    if listening {
+      post("cancel")
+      listening = false
+      paintMic()
+    }
+  }
+
+  deinit {
+    CFNotificationCenterRemoveEveryObserver(CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque())
   }
 
   override func viewDidLayoutSubviews() {
@@ -385,18 +407,107 @@ final class KeyboardViewController: UIInputViewController {
 
   // MARK: Mic
 
+  /// Purple: start speaking (or start a listening session in Wispra first). Red: done, type it.
   @objc private func micTapped() {
     guard hasFullAccess else {
       statusLabel.text = "Bật Cho phép truy cập đầy đủ để nói"
       return
     }
-    guard let url = URL(string: "wispra://keyboard-dictation") else { return }
-    if openContainingApp(url) {
-      statusLabel.text = "Nói trong Wispra, rồi bấm ◀ để quay lại"
-      startPolling(seconds: 300)
-    } else {
-      statusLabel.text = "Mở Wispra, bấm Dictate, rồi quay lại"
+    if listening {
+      post("stop")
+      listening = false
+      paintMic()
+      statusLabel.text = "Đang viết…"
+      startPolling(seconds: 30)
+      return
     }
+    if let session = readSession(), SessionStatus.isLive(untilMs: session.until, beatMs: session.beat, nowMs: nowMs()) {
+      post("start")
+      listening = true
+      lastTyped = nil
+      refreshUndo()
+      paintMic()
+      statusLabel.text = "Đang nghe… bấm mic đỏ khi xong"
+      return
+    }
+    // No session: Wispra starts one (Apple lets only the app start the microphone)
+    guard let url = URL(string: "wispra://keyboard-session") else { return }
+    if openContainingApp(url) {
+      statusLabel.text = "Bật phiên nghe trong Wispra, rồi bấm ◀ để quay lại"
+    } else {
+      statusLabel.text = "Mở Wispra để bật phiên nghe, rồi quay lại"
+    }
+  }
+
+  private func paintMic() {
+    micButton.backgroundColor = listening ? UIColor(red: 0xEF / 255.0, green: 0x44 / 255.0, blue: 0x44 / 255.0, alpha: 1) : lavender
+    micButton.tintColor = listening ? .white : purple
+    micButton.layer.cornerRadius = listening ? 16 : 8
+    micButton.accessibilityLabel = listening ? "Listening. Tap to type what you said" : "Speak with Wispra"
+  }
+
+  private func showSession() {
+    paintMic()
+    guard !listening else { return }
+    if let session = readSession(), SessionStatus.isLive(untilMs: session.until, beatMs: session.beat, nowMs: nowMs()) {
+      statusLabel.text = "Phiên nghe · còn \(SessionStatus.minutesLeft(untilMs: session.until, nowMs: nowMs())) phút"
+    } else if lastTyped == nil {
+      statusLabel.text = "Wispra"
+    }
+  }
+
+  private func readSession() -> (until: Double, beat: Double)? {
+    guard hasFullAccess, let pasteboard = UIPasteboard(name: Self.sessionPasteboardName, create: false),
+          let data = pasteboard.string?.data(using: .utf8),
+          let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let until = status["until"] as? Double, let beat = status["beat"] as? Double else { return nil }
+    return (until, beat)
+  }
+
+  private func nowMs() -> Double { Date().timeIntervalSince1970 * 1000 }
+
+  private func post(_ name: String) {
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName("\(Self.notifyPrefix).\(name)" as CFString), nil, nil, true)
+  }
+
+  /// Wispra posts ".text" as soon as a piece is transcribed: typed right away
+  private func observeWords() {
+    guard !observingText else { return }
+    observingText = true
+    CFNotificationCenterAddObserver(
+      CFNotificationCenterGetDarwinNotifyCenter(),
+      Unmanaged.passUnretained(self).toOpaque(),
+      { _, observer, _, _, _ in
+        guard let observer = observer else { return }
+        let keyboard = Unmanaged<KeyboardViewController>.fromOpaque(observer).takeUnretainedValue()
+        DispatchQueue.main.async { keyboard.typeQueuedPieces() }
+      },
+      "\(Self.notifyPrefix).text" as CFString,
+      nil,
+      .deliverImmediately
+    )
+  }
+
+  /// Types the pieces Wispra transcribed, in order, each once, where the cursor is
+  func typeQueuedPieces() {
+    guard hasFullAccess, let pasteboard = UIPasteboard(name: Self.chunksPasteboardName, create: false) else { return }
+    let pieces = ChunkQueue.toType(ChunkQueue.parse(pasteboard.string), typed: Set(typedPieces), nowMs: nowMs())
+    guard !pieces.isEmpty else { return }
+    for piece in pieces {
+      typedPieces.append(piece.key)
+      let words = piece.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !words.isEmpty {
+        let commit = Self.spaced(before: textDocumentProxy.documentContextBeforeInput, words: words, after: textDocumentProxy.documentContextAfterInput)
+        textDocumentProxy.insertText(commit)
+        lastTyped = (lastTyped ?? "") + commit
+      }
+      if piece.last {
+        statusLabel.text = lastTyped == nil ? "Không nghe rõ, thử lại" : "Đã gõ bằng Wispra"
+      }
+    }
+    if typedPieces.count > 200 { typedPieces.removeFirst(typedPieces.count - 200) }
+    UserDefaults.standard.set(typedPieces, forKey: "typedPieces")
+    refreshUndo()
   }
 
   @objc private func undo() {
@@ -430,6 +541,7 @@ final class KeyboardViewController: UIInputViewController {
         return
       }
       self.typeWaitingWords()
+      self.typeQueuedPieces()
     }
   }
 

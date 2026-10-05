@@ -92,6 +92,8 @@ interface EntriesApi {
   // Signed in with another account than the one whose data is on this phone: what the user must
   // choose before anything is synced (null when there is nothing to choose)
   accountChoice: AccountChoiceView | null;
+  // Wispra Cloud may be used for this phone's data now (signed in, no account choice waiting)
+  cloudAllowed(): boolean;
   // Applies the choice to exactly the entries the question showed (shownIds); see ChoiceResult
   chooseAccount(choice: AccountChoice, shownIds: readonly string[]): ChoiceResult;
 }
@@ -797,8 +799,9 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       ask,
       accountChoice,
       chooseAccount,
+      cloudAllowed,
     }),
-    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, removeAll, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makePostFor, ask, accountChoice, chooseAccount],
+    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, removeAll, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makePostFor, ask, accountChoice, chooseAccount, cloudAllowed],
   );
   return <EntriesContext.Provider value={api}>{children}</EntriesContext.Provider>;
 }

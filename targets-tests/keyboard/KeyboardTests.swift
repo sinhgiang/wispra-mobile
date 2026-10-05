@@ -1,10 +1,9 @@
 import Foundation
 
-// Tests of the Wispra keyboard's logic: Telex typing (targets/keyboard/Telex.swift) and the keys and
-// typing rules (targets/keyboard/KeyboardLogic.swift). Run on GitHub's macOS machines by
-// .github/workflows/ios.yml:
-//   swiftc -parse-as-library targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift \
-//     targets-tests/keyboard/KeyboardTests.swift -o keyboard-tests && ./keyboard-tests
+// Tests of the Wispra keyboard's logic: Telex typing (targets/keyboard/Telex.swift), the keys, typing
+// rules, dictated pieces and the session status (targets/keyboard/KeyboardLogic.swift), and how the
+// app cuts a listening session into pieces (modules/wispra-keyboard-bridge/ios/Segmenter.swift).
+// Run on GitHub's macOS machines by .github/workflows/ios.yml with swiftc.
 
 @main
 struct KeyboardTests {
@@ -76,10 +75,70 @@ struct KeyboardTests {
     check("the word after punctuation", KeyboardLogic.trailingWord("(việt") == "việt")
   }
 
+
+  static func segmenter() {
+    var s = Segmenter()
+    // Talk for a second, then a pause: the piece ends after 0.7 s of silence
+    var cut = false
+    for _ in 0..<8 { cut = s.feed(level: 0.1, duration: 0.125) }
+    check("no cut while talking", !cut)
+    var cutAt = 0
+    for n in 1...10 where !cut {
+      cut = s.feed(level: 0.001, duration: 0.125)
+      if cut { cutAt = n }
+    }
+    check("cut after a 0.75 s pause", cut && cutAt == 6, "at \(cutAt)")
+    s.reset()
+    // Silence only: never cut early, and nothing heard
+    for _ in 0..<20 { cut = s.feed(level: 0.001, duration: 0.1) }
+    check("silence alone is no piece", !cut && !s.heardVoice)
+    s.reset()
+    // Talking without a pause: cut at 12 s
+    var steps = 0
+    repeat { steps += 1 } while !s.feed(level: 0.2, duration: 0.5)
+    check("long talk cut at 12 s", steps == 24, "after \(steps)")
+    // Level of samples
+    let samples: [Float] = [0.5, -0.5, 0.5, -0.5]
+    let level = samples.withUnsafeBufferPointer { Segmenter.level($0.baseAddress!, count: 4) }
+    check("loudness", abs(level - 0.5) < 0.0001)
+  }
+
+  static func chunks() {
+    func c(_ u: String, _ i: Int, _ at: Double, _ text: String = "x", last: Bool = false) -> DictationChunk {
+      DictationChunk(utterance: u, index: i, text: text, at: at, last: last)
+    }
+    let now = 1_000_000.0
+    // In order, as they come
+    check("first piece", ChunkQueue.toType([c("a", 0, now)], typed: [], nowMs: now).map { $0.key } == ["a#0"])
+    check("the next after typed ones", ChunkQueue.toType([c("a", 0, now), c("a", 1, now)], typed: ["a#0"], nowMs: now).map { $0.key } == ["a#1"])
+    // Piece 1 came before piece 0: wait for 0
+    check("waits for a missing piece", ChunkQueue.toType([c("a", 1, now - 1000)], typed: [], nowMs: now).isEmpty)
+    // …unless piece 0 never comes
+    check("skips a piece that never came", ChunkQueue.toType([c("a", 1, now - 7000)], typed: [], nowMs: now).map { $0.key } == ["a#1"])
+    // Several utterances in the order they started; stale ones left alone
+    let list = [c("b", 0, now - 100), c("a", 0, now - 200), c("a", 1, now - 150), c("old", 0, now - 16 * 60 * 1000)]
+    check("utterances in order", ChunkQueue.toType(list, typed: [], nowMs: now).map { $0.key } == ["a#0", "a#1", "b#0"])
+    // JSON from the app
+    let json = "[{\"u\":\"a\",\"i\":0,\"text\":\"Xin chào\",\"at\":5,\"last\":true}]"
+    check("reads the app's list", ChunkQueue.parse(json) == [c("a", 0, 5, "Xin chào", last: true)])
+    check("ignores a broken list", ChunkQueue.parse("nope").isEmpty && ChunkQueue.parse(nil).isEmpty)
+  }
+
+  static func session() {
+    let now = 1_000_000.0
+    check("live while on and beating", SessionStatus.isLive(untilMs: now + 60_000, beatMs: now - 5000, nowMs: now))
+    check("not live once over", !SessionStatus.isLive(untilMs: now - 1, beatMs: now, nowMs: now))
+    check("not live when the app stopped writing", !SessionStatus.isLive(untilMs: now + 60_000, beatMs: now - 30_000, nowMs: now))
+    check("minutes left", SessionStatus.minutesLeft(untilMs: now + 14 * 60_000 + 1, nowMs: now) == 15)
+  }
+
   static func main() {
     telex()
     layout()
     rules()
+    segmenter()
+    chunks()
+    session()
     print("\(passed)/\(passed + failed) passed")
     if failed > 0 { exit(1) }
   }
