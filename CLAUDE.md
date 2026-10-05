@@ -43,8 +43,14 @@ The owner never opens Codemagic. When there is new code for the owner to try on 
 2. Tag that commit `build-<YYYYMMDD>-<HHMM>` (local time) and push only the tag:
    `git tag build-20261005-1300 <commit>` then `git push origin build-20261005-1300`.
    The tagged commit must contain the `triggering:` block of `codemagic.yaml`.
-   Codemagic gets the tag through its GitHub App (no webhook or key to set up) and runs
-   "iOS TestFlight".
+   Codemagic gets the tag through the repository's webhook and runs "iOS TestFlight". No key is
+   needed, but the webhook is: the Codemagic GitHub App alone does not start tag builds (a tag
+   pushed before the webhook existed started nothing). The webhook (id 692329493, added by the
+   owner on 2026-10-05) points to `https://api.codemagic.io/hooks/6ac25f672f5acb1c7efd1926`; its
+   `push` event is enough for tags. Check it with `gh api repos/sinhgiang/wispra-mobile/hooks`.
+   If a pushed tag gets no "iOS TestFlight" check run within a few minutes, check the webhook
+   first (is it there, active, and are its recent deliveries answered 202:
+   `gh api repos/sinhgiang/wispra-mobile/hooks/<id>/deliveries`), and only then ask the owner.
 3. Follow it from GitHub: the Codemagic app posts a check run named "iOS TestFlight" on the
    commit (`gh api repos/sinhgiang/wispra-mobile/commits/<sha>/check-runs`). Wait in bounded
    loops. A green build reaches the owner's internal TestFlight group "Internal" by itself,

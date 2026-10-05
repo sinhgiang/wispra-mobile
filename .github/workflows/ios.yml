@@ -1,7 +1,7 @@
 # Checks that the iOS app, the Wispra keyboard extension among it, compiles, on GitHub's macOS
 # machines (free for this public repository). Nothing is signed, uploaded or sent to Apple; the
-# signed TestFlight build stays on Codemagic (codemagic.yaml), started by hand. This only catches
-# compile errors early, before anyone presses a button there.
+# signed TestFlight build stays on Codemagic (codemagic.yaml), started by a pushed build-* tag
+# (see CLAUDE.md). This catches compile errors early, before a commit is tagged for a build.
 
 name: iOS compile check
 

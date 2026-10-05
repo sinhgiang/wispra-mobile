@@ -1,6 +1,6 @@
 # iOS builds run on Codemagic because there is no Mac on the development machine.
 # Pushes never start a build. The TestFlight workflow starts by itself when a tag named build-*
-# is pushed (T-0156: the agent tags the commit the owner should try, so the owner never opens
+# is pushed, through the repository's Codemagic webhook (T-0156: the agent tags the commit the owner should try, so the owner never opens
 # Codemagic); the other workflows start only with "Start new build" in Codemagic.
 #
 # The app is an Expo project: `expo prebuild` generates the ios/ folder from app.json on the
@@ -104,8 +104,10 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     # Started by a pushed tag build-<date>-<time> (for example build-20261005-1300) on the commit to
-    # build, through the Codemagic GitHub App (no webhook or key to set up). Codemagic reads this
-    # file from the tagged commit. Branch pushes start nothing.
+    # build. Codemagic hears of the tag through the repository's webhook to
+    # https://api.codemagic.io/hooks/6ac25f672f5acb1c7efd1926 (its push event is enough); without
+    # it no tag starts a build, the Codemagic GitHub App alone does not. No key is needed. Codemagic
+    # reads this file from the tagged commit. Branch pushes start nothing. How-to: CLAUDE.md.
     triggering:
       events:
         - tag
