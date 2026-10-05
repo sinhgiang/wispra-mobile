@@ -176,9 +176,9 @@ workflows:
         # No beta app review: that is only for external testers (Codemagic CLI: --testflight
         # "Enable submission of an app for Testflight beta app review to allow external testing")
         submit_to_testflight: false
-        # Once processed, the build is added to the internal tester group "Internal" (created by
-        # the owner in App Store Connect > TestFlight > Internal Testing), so it shows up in the
-        # TestFlight app of its members without any review. The name must match exactly.
-        beta_groups:
-          - Internal
+        # No beta_groups: adding the build to a group is "post-processing", done after the upload,
+        # and when it fails (group name not found, Apple still processing) the whole build shows
+        # "finished with post-processing failed" although the .ipa reached App Store Connect (build
+        # 3). The internal group gets new builds by itself with "Enable automatic distribution"
+        # (App Store Connect > TestFlight > the internal group), which needs nothing here.
         submit_to_app_store: false
