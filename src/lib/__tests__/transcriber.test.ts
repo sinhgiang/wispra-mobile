@@ -1,7 +1,9 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { UploadType, type UploadOptions, type UploadResult } from 'expo-file-system';
 
-import { pieceFailed } from '../keyboard-session';
+import { pieceFailed, wordsFrom } from '../keyboard-session';
+import { finishedMeeting } from '../meeting';
+import { NO_SPEECH, pieceUpdate } from '../transcribe-queue';
 import { needsResend, resultFromResponse, SPEECH_NOT_MADE_OUT, transcribeFile, type AudioFile } from '../transcriber';
 
 jest.mock('../cloud-auth', () => ({ currentSession: () => null, validToken: async () => null }));
@@ -129,7 +131,7 @@ describe('real speech lost to the filters is sent again, once (T-0164 review)', 
   });
 
   it('decides from the answer: at least 3 seconds uncovered and half of what Whisper wrote', () => {
-    const base = { text: '', words: 12, wordsLeft: 0, speechSeconds: 12, uncoveredSeconds: 12, gibberish: true };
+    const base = { text: '', words: 12, wordsLeft: 0, speechSeconds: 12, uncoveredSeconds: 12, gibberishWords: 12, gibberish: true };
     expect(needsResend(base)).toBe(true);
     expect(needsResend({ ...base, uncoveredSeconds: 2 })).toBe(false);
     expect(needsResend({ ...base, uncoveredSeconds: 5 })).toBe(false);
@@ -152,5 +154,85 @@ describe('the callers of the filter (T-0164 review, point 4)', () => {
   it('keyboard sessions: a piece with words that could not be made out counts as failed, silence does not', () => {
     expect(pieceFailed({ ok: false, error: SPEECH_NOT_MADE_OUT })).toBe(true);
     expect(pieceFailed({ ok: false, error: 'No speech was heard in this recording.' })).toBe(false);
+  });
+});
+
+// T-0164 review 2, point 1: silence Whisper filled with an outro is not lost speech
+describe('silence filled with an outro is "no speech", not "speech heard" (T-0164 review 2)', () => {
+  const outros = [' Cảm ơn các bạn đã theo dõi.', ' Thank you for watching.', ' Hẹn gặp lại các bạn trong video sau.', ' Cảm ơn các bạn đã xem. Hẹn gặp lại các bạn.'];
+
+  function silent(text: string) {
+    // At an ordinary, low no-speech probability: the case the hallucination filter exists for
+    return JSON.stringify({ text, segments: [{ text, no_speech_prob: 0.05, avg_logprob: -0.3, start: 0, end: 6 }] });
+  }
+
+  it.each(outros)('says no speech for the answer %s', (outro) => {
+    expect(resultFromResponse(200, silent(outro))).toEqual({ ok: false, error: NO_SPEECH });
+  });
+
+  it('is not sent again and costs one upload, not two', async () => {
+    const { file, calls } = audio({ reply: async () => ({ status: 200, body: silent(outros[0]), headers: {} }) });
+    expect(await transcribeFile(file, 6_000, token)).toEqual({ ok: false, error: NO_SPEECH });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('is still reported when real speech is lost: only bare consonants count, not outros', () => {
+    const lost = JSON.stringify({ segments: [{ text: ' B ph tr s vi c tr l m c n g ch', no_speech_prob: 0.05, avg_logprob: -0.07, start: 0, end: 12 }] });
+    expect(resultFromResponse(200, lost)).toEqual({ ok: false, error: SPEECH_NOT_MADE_OUT });
+    // Garbled speech and an outro together: speech was lost, still reported
+    const both = JSON.stringify({
+      segments: [
+        { text: ' B ph tr s vi c tr l m c n g ch', no_speech_prob: 0.05, avg_logprob: -0.07, start: 0, end: 10 },
+        { text: ' Cảm ơn các bạn đã theo dõi.', no_speech_prob: 0.05, avg_logprob: -0.3, start: 10, end: 12 },
+      ],
+    });
+    expect(resultFromResponse(200, both)).toEqual({ ok: false, error: SPEECH_NOT_MADE_OUT });
+  });
+
+  it('does not count the minutes a second time when it sends a piece again', async () => {
+    const garbled = JSON.stringify({ segments: [{ text: ' B ph tr s vi c tr l m c n g ch th nh t', no_speech_prob: 0.01, avg_logprob: -0.07, start: 0, end: 12 }] });
+    let n = 0;
+    const { file, calls } = audio({ reply: async () => ({ status: 200, body: n++ === 0 ? garbled : silent(outros[0]), headers: {} }) });
+    await transcribeFile(file, 12_000, token);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].options?.headers).toHaveProperty('X-Audio-Duration-Seconds', '12');
+    expect(calls[1].options?.headers).not.toHaveProperty('X-Audio-Duration-Seconds');
+  });
+});
+
+describe('what each path does with a piece of silence (T-0164 review 2)', () => {
+  const silence = resultFromResponse(200, JSON.stringify({ segments: [{ text: ' Cảm ơn các bạn đã theo dõi.', no_speech_prob: 0.05, avg_logprob: -0.3 }] }));
+  const lost = resultFromResponse(200, JSON.stringify({ segments: [{ text: ' ch c kh th n c nh c', no_speech_prob: 0.05, avg_logprob: -0.3 }] }));
+
+  it('a meeting piece: silence becomes an empty, finished piece; lost speech is failed, audio kept', () => {
+    expect(pieceUpdate(silence)).toEqual({ kind: 'done', text: '' });
+    expect(pieceUpdate(lost)).toEqual({ kind: 'failed', error: SPEECH_NOT_MADE_OUT });
+    expect(pieceUpdate({ ok: false, error: 'Could not reach Wispra Cloud', transient: true })).toEqual({ kind: 'later', error: 'Could not reach Wispra Cloud' });
+    expect(pieceUpdate({ ok: true, text: 'Xin chào' })).toEqual({ kind: 'done', text: 'Xin chào' });
+  });
+
+  it('the whole meeting: a silent last piece does not make it failed, so it needs no Try again', () => {
+    const piece = (id: string, startMs: number, update: ReturnType<typeof pieceUpdate>) => ({
+      id,
+      uri: `file:///${id}.m4a`,
+      startMs,
+      durationMs: 30_000,
+      status: update.kind === 'failed' ? ('failed' as const) : ('done' as const),
+      text: update.kind === 'done' ? update.text : null,
+      error: null,
+    });
+    const withSilentEnd = [piece('a', 0, pieceUpdate({ ok: true, text: 'Họp lúc 2 giờ' })), piece('b', 30_000, pieceUpdate(silence))];
+    expect(finishedMeeting(withSilentEnd)).toEqual({ status: 'done', text: 'Họp lúc 2 giờ', error: null });
+    // With lost speech the meeting is failed, and says which kind of part
+    const withLost = [...withSilentEnd.slice(0, 1), piece('c', 30_000, pieceUpdate(lost))];
+    expect(finishedMeeting(withLost)).toMatchObject({ status: 'failed' });
+    // A meeting that is all silence says so (T-0154), it is not failed
+    expect(finishedMeeting([piece('x', 0, pieceUpdate(silence))])).toMatchObject({ status: 'done', text: null });
+  });
+
+  it('a keyboard piece: silence is "not heard", lost speech says the words could not be written', () => {
+    expect(pieceFailed(silence)).toBe(false);
+    expect(pieceFailed(lost)).toBe(true);
+    expect(wordsFrom(silence)).toBe('');
   });
 });

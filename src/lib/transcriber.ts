@@ -3,7 +3,7 @@ import { File, UploadType, type UploadOptions, type UploadResult } from 'expo-fi
 import { currentSession, validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
 import type { Entry } from './entries';
-import { emptyAudio } from './transcribe-queue';
+import { emptyAudio, NO_AUDIO, NO_SPEECH } from './transcribe-queue';
 import { readAnswer, type ReadAnswer, type VerboseTranscript } from './transcript-filter';
 
 // transient: nothing is wrong with the recording (offline, signed out, server busy), so it can
@@ -62,10 +62,11 @@ export function analyseResponse(status: number, body: string): Analysed {
   }
   const answer = readAnswer(json as VerboseTranscript);
   if (!answer.text) {
-    // Whisper wrote words for it, but none survived the filters (every accent lost, say): not the
-    // same as silence. The words were there; the audio is kept (T-0164 review, point 2).
-    if (answer.words >= 2 && answer.wordsLeft === 0) return { result: { ok: false, error: SPEECH_NOT_MADE_OUT }, answer };
-    return { result: { ok: false, error: 'No speech was heard in this recording.' }, answer };
+    // Whisper wrote words and bare consonants cut out left nothing (every accent lost, say): speech
+    // was there and is lost; the audio is kept. Words dropped as an outro ("Cảm ơn các bạn đã theo
+    // dõi") are silence Whisper filled: that is "no speech", never this card (T-0164 review 2, point 1)
+    if (answer.gibberishWords >= 2 && answer.wordsLeft === 0) return { result: { ok: false, error: SPEECH_NOT_MADE_OUT }, answer };
+    return { result: { ok: false, error: NO_SPEECH }, answer };
   }
   return { result: { ok: true, text: answer.text }, answer };
 }
@@ -127,7 +128,7 @@ export async function transcribeFile(
 ): Promise<TranscribeResult> {
   if (!audio.exists) return { ok: false, error: 'The audio file is not on this phone.' };
   // Nothing was recorded in it: nothing worth sending
-  if (emptyAudio(audio.size)) return { ok: false, error: 'No audio was recorded in this file.' };
+  if (emptyAudio(audio.size)) return { ok: false, error: NO_AUDIO };
   if ((audio.size ?? 0) > CLOUD_UPLOAD_MAX_BYTES) {
     return {
       ok: false,
@@ -141,7 +142,8 @@ export async function transcribeFile(
   if ('error' in first) return first.error;
   // Real speech lost to the filters: once more, asking for Vietnamese; the answer with more words wins
   if (!options.language && needsResend(first.analysed.answer)) {
-    const again = await sendOnce(audio, durationMs, bearer, 'vi');
+    // Not counted toward the monthly minutes a second time: no duration header
+    const again = await sendOnce(audio, durationMs, bearer, 'vi', false);
     if (!('error' in again)) return betterOf(first.analysed, again.analysed).result;
   }
   return first.analysed.result;
@@ -153,6 +155,7 @@ async function sendOnce(
   durationMs: number,
   bearer: string,
   language: string | undefined,
+  countMinutes = true,
 ): Promise<{ analysed: Analysed } | { error: TranscribeResult }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -167,7 +170,7 @@ async function sendOnce(
       headers: {
         Authorization: `Bearer ${bearer}`,
         // The server counts this toward the monthly minutes
-        ...(durationMs > 0 ? { 'X-Audio-Duration-Seconds': String(Math.ceil(durationMs / 1000)) } : {}),
+        ...(countMinutes && durationMs > 0 ? { 'X-Audio-Duration-Seconds': String(Math.ceil(durationMs / 1000)) } : {}),
       },
       // Sent now, while the app is open; a background session may wait for a better moment
       sessionType: 'foreground',

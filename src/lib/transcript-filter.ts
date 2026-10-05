@@ -246,7 +246,9 @@ export interface ReadAnswer {
   // Seconds of the segments Whisper wrote for, and the part of them whose words did not survive
   speechSeconds: number;
   uncoveredSeconds: number;
-  // A bare-consonant run was cut out
+  // Words cut out as bare consonants (not the same as words dropped as an outro: those are silence
+  // Whisper filled, and nothing was lost). Only these can mean real speech was lost.
+  gibberishWords: number;
   gibberish: boolean;
 }
 
@@ -254,9 +256,9 @@ function words(text: string): number {
   return wordTokens(text).length;
 }
 
-// Whether a bare-consonant run is in the text (the filter cuts it sentence by sentence)
-function hasGibberish(text: string): boolean {
-  return splitSentences(text).some((sentence) => stripGibberish(sentence) !== sentence);
+// How many words of the text are bare-consonant runs (the filter cuts them sentence by sentence)
+function gibberishWordsIn(text: string): number {
+  return splitSentences(text).reduce((sum, sentence) => sum + Math.max(0, words(sentence) - words(stripGibberish(sentence))), 0);
 }
 
 export function readAnswer(data: VerboseTranscript): ReadAnswer {
@@ -264,10 +266,11 @@ export function readAnswer(data: VerboseTranscript): ReadAnswer {
   if (segments.length === 0) {
     const original = (data.text ?? '').trim();
     const text = filterKnownHallucinations(original);
-    return { text, words: words(original), wordsLeft: words(text), speechSeconds: 0, uncoveredSeconds: 0, gibberish: hasGibberish(original) };
+    const cut = gibberishWordsIn(original);
+    return { text, words: words(original), wordsLeft: words(text), speechSeconds: 0, uncoveredSeconds: 0, gibberishWords: cut, gibberish: cut > 0 };
   }
   const seen = new Map<string, number>();
-  let gibberish = false;
+  let cut = 0;
   let total = 0;
   let left = 0;
   let speech = 0;
@@ -275,7 +278,7 @@ export function readAnswer(data: VerboseTranscript): ReadAnswer {
   const pieces = segments.filter(isReliableSegment).map((s) => {
     const raw = s.compression_ratio !== undefined && s.compression_ratio > COMPRESSION_RATIO_THRESHOLD ? collapseLoops(s.text) : s.text;
     const original = raw.trim();
-    if (hasGibberish(original)) gibberish = true;
+    cut += gibberishWordsIn(original);
     const kept = filterKnownHallucinations(original, seen);
     // Whisper's own spacing between segments is kept
     const space = kept && /^\s/.test(raw) ? ' ' : '';
@@ -288,7 +291,7 @@ export function readAnswer(data: VerboseTranscript): ReadAnswer {
     if (!(remaining > 0 && remaining * 2 >= had)) uncovered += seconds;
     return space + kept;
   });
-  return { text: pieces.join('').trim(), words: total, wordsLeft: left, speechSeconds: speech, uncoveredSeconds: uncovered, gibberish };
+  return { text: pieces.join('').trim(), words: total, wordsLeft: left, speechSeconds: speech, uncoveredSeconds: uncovered, gibberishWords: cut, gibberish: cut > 0 };
 }
 
 export function cleanTranscript(data: VerboseTranscript): string {

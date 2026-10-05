@@ -16,7 +16,7 @@ import {
 } from './account-switch';
 import { currentSession, subscribe as onSignInChange } from './cloud-auth';
 import { commitWithRollback } from './cloud-gate';
-import { nextJob, runQueue, TRANSCRIBE_CONCURRENCY, type Job, type JobOutcome } from './transcribe-queue';
+import { nextJob, pieceUpdate, runQueue, TRANSCRIBE_CONCURRENCY, type Job, type JobOutcome } from './transcribe-queue';
 import { File } from 'expo-file-system';
 
 import { defaultMeetingTitle, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
@@ -534,16 +534,12 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
           const piece = job.piece;
           mark(e.id, true);
           try {
-            const result = await transcribeAudio(piece.uri, piece.durationMs);
-            if (result.ok) updateSegment(e.id, piece.id, { status: 'done', text: result.text, error: null });
-            else if (result.transient) {
-              updateSegment(e.id, piece.id, { error: result.error });
+            const update = pieceUpdate(await transcribeAudio(piece.uri, piece.durationMs));
+            if (update.kind === 'done') updateSegment(e.id, piece.id, { status: 'done', text: update.text, error: null });
+            else if (update.kind === 'later') {
+              updateSegment(e.id, piece.id, { error: update.error });
               return 'later';
-            }
-            // A piece with nothing said (or nothing recorded) in it is simply empty, not a failure
-            else if (result.error.startsWith('No speech') || result.error.startsWith('No audio')) {
-              updateSegment(e.id, piece.id, { status: 'done', text: '', error: null });
-            } else updateSegment(e.id, piece.id, { status: 'failed', error: result.error });
+            } else updateSegment(e.id, piece.id, { status: 'failed', error: update.error });
           } finally {
             mark(e.id, false);
           }

@@ -2,6 +2,7 @@
 // each piece the session cuts out of what was said. Pure, so it is tested; the screen and the
 // bridge in the app wire it to the native session and to Wispra Cloud.
 
+import { isSilenceError } from './transcribe-queue';
 import type { TranscribeResult } from './transcriber';
 
 export interface PieceInfo {
@@ -34,7 +35,7 @@ export function wordsFrom(result: TranscribeResult): string {
 // having nothing said in it: the keyboard then says the words could not be written, not "not heard"
 // (T-0163 review)
 export function pieceFailed(result: TranscribeResult): boolean {
-  return !result.ok && !result.error.startsWith('No speech') && !result.error.startsWith('No audio');
+  return !result.ok && !isSilenceError(result.error);
 }
 
 // How long a session lasts, in minutes (T-0163): chosen once in Account, never each time the mic

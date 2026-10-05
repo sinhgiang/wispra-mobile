@@ -118,6 +118,34 @@ export async function runQueue(opts: {
   return ran;
 }
 
+// What a piece with nothing in it says (transcriber.ts). Not a failure: a meeting piece becomes
+// empty, a keyboard piece is "not heard"; neither is tried again, and neither makes a meeting "failed"
+// (T-0164 review 2: silence Whisper filled with an outro is this, never "speech heard").
+export const NO_SPEECH = 'No speech was heard in this recording.';
+export const NO_AUDIO = 'No audio was recorded in this file.';
+
+export function isSilenceError(error: string): boolean {
+  return error === NO_SPEECH || error === NO_AUDIO;
+}
+
+// What a piece of a meeting becomes once Wispra Cloud answered: the one decision the store makes,
+// kept pure so it is tested where it is made (T-0164 review 2).
+// - words: done, with the words
+// - nothing said or recorded (an outro Whisper wrote over silence, say): done and empty, never failed
+// - a passing failure (no connection, busy): later, the reason kept on the card
+// - anything else, as speech lost to the filters or a refused file: failed, the audio kept
+export type PieceUpdate =
+  | { kind: 'done'; text: string }
+  | { kind: 'later'; error: string }
+  | { kind: 'failed'; error: string };
+
+export function pieceUpdate(result: { ok: true; text: string } | { ok: false; error: string; transient?: boolean }): PieceUpdate {
+  if (result.ok) return { kind: 'done', text: result.text };
+  if (result.transient) return { kind: 'later', error: result.error };
+  if (isSilenceError(result.error)) return { kind: 'done', text: '' };
+  return { kind: 'failed', error: result.error };
+}
+
 // Less than this, the file holds no audio worth sending (an AAC file with nothing recorded is a
 // few hundred bytes of headers); sending it fails on the phone itself
 export const MIN_AUDIO_BYTES = 1024;
