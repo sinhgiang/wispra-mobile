@@ -6,7 +6,11 @@ module.exports = {
   name: 'WispraKeyboard',
   displayName: 'Wispra',
   bundleIdentifier: '.keyboard',
-  // The keyboard and the app share words through a named pasteboard (same team), not an App
-  // Group, so no extra capability has to be set up in the Apple Developer account
   deploymentTarget: '16.4',
+  // The keychain group shared with the app: the session status and the words come through it, since
+  // iOS refuses the pasteboard to Wispra while it runs in the background (T-0163, SharedChannel.swift).
+  // The App Store profiles allow <team>.* already, so nothing is registered with Apple.
+  entitlements: {
+    'keychain-access-groups': ['$(AppIdentifierPrefix)com.sinhgiang.wispramobile.shared'],
+  },
 };

@@ -39,6 +39,8 @@ jobs:
       # The keyboard's Telex typing and key logic (Foundation only), as a small test program
       - name: Swift tests of the Wispra keyboard
         run: |
+          # The app and the keyboard share one SharedChannel.swift, kept as two identical copies
+          diff targets/keyboard/SharedChannel.swift modules/wispra-keyboard-bridge/ios/SharedChannel.swift
           swiftc -parse-as-library targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift modules/wispra-keyboard-bridge/ios/Segmenter.swift targets-tests/keyboard/KeyboardTests.swift -o "$RUNNER_TEMP/keyboard-tests"
           "$RUNNER_TEMP/keyboard-tests"
 
@@ -52,8 +54,10 @@ jobs:
           cp targets-tests/keyboard-sim/Info.plist "$APP/Info.plist"
           xcrun -sdk iphonesimulator swiftc -target arm64-apple-ios16.4-simulator -module-name WispraKeyboard -parse-as-library \
             targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift targets/keyboard/KeyboardViewController.swift \
-            targets-tests/keyboard-sim/Harness.swift -o "$APP/Harness"
-          codesign --force --sign - "$APP"
+            targets/keyboard/SharedChannel.swift modules/wispra-keyboard-bridge/ios/KeyboardSession.swift \
+            modules/wispra-keyboard-bridge/ios/Segmenter.swift targets-tests/keyboard-sim/Harness.swift -o "$APP/Harness"
+          # With a keychain group like the app's and the keyboard's, so the shared keychain is tested
+          codesign --force --sign - --entitlements targets-tests/keyboard-sim/Harness.entitlements "$APP"
           UDID=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
           devices = json.load(sys.stdin)["devices"]

@@ -13,7 +13,14 @@
     "ios": {
       "bundleIdentifier": "com.sinhgiang.wispramobile",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "AppIdentifierPrefix": "$(AppIdentifierPrefix)"
+      },
+      "entitlements": {
+        "keychain-access-groups": [
+          "$(AppIdentifierPrefix)com.sinhgiang.wispramobile",
+          "$(AppIdentifierPrefix)com.sinhgiang.wispramobile.shared"
+        ]
       }
     },
     "android": {

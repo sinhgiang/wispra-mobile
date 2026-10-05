@@ -47,8 +47,10 @@ public class WispraKeyboardBridgeModule: Module {
       if let keyboards = UserDefaults.standard.object(forKey: "AppleKeyboards") as? [String] {
         status["enabled"] = keyboards.contains { $0.hasPrefix(Self.keyboardBundleId) }
       }
-      if let pasteboard = UIPasteboard(name: Self.seenPasteboardName, create: false),
-         let text = pasteboard.string, let at = Double(text) {
+      // The shared keychain first (SharedChannel), the pasteboard of earlier keyboards second
+      let seen = [SharedChannel.read(.seen), UIPasteboard(name: Self.seenPasteboardName, create: false)?.string]
+        .compactMap { $0.flatMap(Double.init) }
+      if let at = seen.max() {
         status["lastSeenAt"] = at
       }
       return status

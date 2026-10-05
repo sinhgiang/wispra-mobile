@@ -20,6 +20,9 @@ final class KeyboardViewController: UIInputViewController {
   static let sessionPasteboardName = UIPasteboard.Name("com.sinhgiang.wispramobile.keyboard.session")
   static let chunksPasteboardName = UIPasteboard.Name("com.sinhgiang.wispramobile.keyboard.chunks")
   static let notifyPrefix = "com.sinhgiang.wispramobile.dictation"
+  /// After the red mic is tapped, how long the keyboard waits for the words before it says they did
+  /// not come (instead of "Đang viết…" forever)
+  static let wordsWaitSeconds: TimeInterval = 45
 
   private enum Shift { case off, once, locked }
 
@@ -49,6 +52,8 @@ final class KeyboardViewController: UIInputViewController {
   private var lastTyped: String?
   /// The mic is red: the app is listening for this keyboard
   private var listening = false
+  /// The mic was tapped red → purple: words are on their way, until the last piece comes
+  private var waitingForWords = false
   /// Pieces already typed (utterance#index), kept across keyboard loads
   private var typedPieces: [String] = UserDefaults.standard.stringArray(forKey: "typedPieces") ?? []
   private var observingText = false
@@ -416,9 +421,10 @@ final class KeyboardViewController: UIInputViewController {
     if listening {
       post("stop")
       listening = false
+      waitingForWords = true
       paintMic()
       statusLabel.text = "Đang viết…"
-      startPolling(seconds: 30)
+      startPolling(seconds: Self.wordsWaitSeconds)
       return
     }
     if let session = readSession(), SessionStatus.isLive(untilMs: session.until, beatMs: session.beat, nowMs: nowMs()) {
@@ -456,12 +462,19 @@ final class KeyboardViewController: UIInputViewController {
     }
   }
 
+  /// The session's status: from the shared keychain, which Wispra writes in the background too;
+  /// the pasteboard only while Wispra was open (earlier builds)
   private func readSession() -> (until: Double, beat: Double)? {
-    guard hasFullAccess, let pasteboard = UIPasteboard(name: Self.sessionPasteboardName, create: false),
-          let data = pasteboard.string?.data(using: .utf8),
-          let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let until = status["until"] as? Double, let beat = status["beat"] as? Double else { return nil }
-    return (until, beat)
+    guard hasFullAccess else { return nil }
+    let sources = [SharedChannel.read(.session), UIPasteboard(name: Self.sessionPasteboardName, create: false)?.string]
+    let found = sources.compactMap { text -> (until: Double, beat: Double)? in
+      guard let data = text?.data(using: .utf8),
+            let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let until = status["until"] as? Double, let beat = status["beat"] as? Double else { return nil }
+      return (until, beat)
+    }
+    // The freshest beat wins
+    return found.max { $0.beat < $1.beat }
   }
 
   private func nowMs() -> Double { Date().timeIntervalSince1970 * 1000 }
@@ -490,8 +503,10 @@ final class KeyboardViewController: UIInputViewController {
 
   /// Types the pieces Wispra transcribed, in order, each once, where the cursor is
   func typeQueuedPieces() {
-    guard hasFullAccess, let pasteboard = UIPasteboard(name: Self.chunksPasteboardName, create: false) else { return }
-    let pieces = ChunkQueue.toType(ChunkQueue.parse(pasteboard.string), typed: Set(typedPieces), nowMs: nowMs())
+    guard hasFullAccess else { return }
+    // The shared keychain (written in the background), then the pasteboard (earlier builds)
+    let chunks = ChunkQueue.parse(SharedChannel.read(.chunks)) + ChunkQueue.parse(UIPasteboard(name: Self.chunksPasteboardName, create: false)?.string)
+    let pieces = ChunkQueue.toType(chunks, typed: Set(typedPieces), nowMs: nowMs())
     guard !pieces.isEmpty else { return }
     for piece in pieces {
       typedPieces.append(piece.key)
@@ -502,6 +517,7 @@ final class KeyboardViewController: UIInputViewController {
         lastTyped = (lastTyped ?? "") + commit
       }
       if piece.last {
+        waitingForWords = false
         statusLabel.text = lastTyped == nil ? "Không nghe rõ, thử lại" : "Đã gõ bằng Wispra"
       }
     }
@@ -538,6 +554,11 @@ final class KeyboardViewController: UIInputViewController {
       }
       if Date() > self.pollUntil {
         timer.invalidate()
+        // The words never came: say what to do instead of "Đang viết…" forever
+        if self.waitingForWords {
+          self.waitingForWords = false
+          self.statusLabel.text = "Chưa nhận được chữ. Mở Wispra để xem bản ghi"
+        }
         return
       }
       self.typeWaitingWords()
@@ -589,11 +610,10 @@ final class KeyboardViewController: UIInputViewController {
 
   /// Only possible with full access (keyboards without it cannot reach any pasteboard)
   private func markSeen() {
-    guard hasFullAccess, let pasteboard = UIPasteboard(name: Self.seenPasteboardName, create: true) else { return }
-    pasteboard.setItems(
-      [["public.utf8-plain-text": String(Int(Date().timeIntervalSince1970 * 1000))]],
-      options: [:]
-    )
+    guard hasFullAccess else { return }
+    let at = String(Int(Date().timeIntervalSince1970 * 1000))
+    SharedChannel.write(.seen, at)
+    UIPasteboard(name: Self.seenPasteboardName, create: true)?.setItems([["public.utf8-plain-text": at]], options: [:])
   }
 
   /// Keyboards have no API to open their app. The usual way: find UIApplication in the responder

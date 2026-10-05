@@ -10,8 +10,10 @@ import { signOut } from '@/lib/cloud-auth';
 import { readUsage, type Usage } from '@/lib/cloud-history';
 import { formatDuration, formatTime, needsTranscription } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
+import { SESSION_CHOICES, sessionLabel } from '@/lib/keyboard-session';
 import { otherAppsRows, type OtherAppsTarget } from '@/lib/setup-guide';
 import { signInWithGoogle } from '@/lib/sign-in';
+import { loadSessionMinutes, saveSessionMinutes } from '@/lib/storage';
 import { useSetupState } from '@/lib/use-setup';
 import { useSession } from '@/lib/use-session';
 
@@ -110,9 +112,22 @@ export default function AccountScreen() {
 // Dictating into other apps (T-0154): small rows here instead of cards on Dictate. On iPhone the
 // keyboard row opens Wispra's page in Settings, where its keyboard is turned on.
 function OtherApps() {
-  const rows = otherAppsRows(useSetupState());
+  const [sessionMinutes, setSessionMinutes] = useState(loadSessionMinutes);
+  const rows = otherAppsRows(useSetupState(), sessionMinutes);
+  const chooseLength = () =>
+    Alert.alert('Listening session', "How long the keyboard's mic stays ready after you open Wispra once. Each use starts the count again.", [
+      ...SESSION_CHOICES.map((m) => ({
+        text: sessionLabel(m),
+        onPress: () => {
+          saveSessionMinutes(m);
+          setSessionMinutes(m);
+        },
+      })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
   const open = (target: OtherAppsTarget) => {
     if (target === 'ios-settings') void Linking.openSettings();
+    else if (target === 'session-length') chooseLength();
     else router.push(target);
   };
   return (

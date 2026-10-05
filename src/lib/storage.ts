@@ -2,6 +2,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 
 import { entryFromInbox, parseEntries, parseInboxRecord, serializeEntries, type Entry } from './entries';
 import { parseOwner, serializeOwner, type DataOwner } from './account-switch';
+import { parseSessionMinutes } from './keyboard-session';
 import { freeName } from './transcribe-queue';
 import { parseDeletionBook, serializeDeletionBook, type DeletionBook } from './history-delete';
 
@@ -111,6 +112,19 @@ export function markGuideSeen(): void {
   ensureDirs();
   const file = new File(root, 'guide-seen');
   if (!file.exists) file.create();
+}
+
+// How long the keyboard's listening session lasts (iPhone), chosen in Account
+export function loadSessionMinutes(): number {
+  const file = new File(root, 'session-minutes');
+  return parseSessionMinutes(file.exists ? file.textSync() : null);
+}
+
+export function saveSessionMinutes(minutes: number): void {
+  ensureDirs();
+  const file = new File(root, 'session-minutes');
+  if (!file.exists) file.create();
+  file.write(String(minutes));
 }
 
 // Dictations made with the mic button over other apps wait here (written by the Android service)

@@ -1,14 +1,17 @@
-// The real Dictate and Account screens, rendered (T-0154 review: what the owner sees is checked on
-// the screens themselves, not only in the functions that choose their labels). Everything outside
-// the screen (recording, the store, the phone's setup) is played by small stand-ins.
+// The real Dictate, Account and keyboard session screens, rendered (T-0154 review: what the owner
+// sees is checked on the screens themselves, not only in the functions that choose their labels).
+// Everything outside the screen (recording, the store, the phone's setup, the native session) is
+// played by small stand-ins.
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { fireEvent, render, screen } from '@testing-library/react-native';
-import { Linking } from 'react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { Alert, Linking } from 'react-native';
 
 import type { SetupState } from '@/lib/setup-guide';
 
 const mockPush = jest.fn();
 let mockSetup: SetupState;
+const mockSaveMinutes = jest.fn();
+const mockStartSession = jest.fn(async (minutes: number) => ({ active: true, until: Date.now() + minutes * 60_000, listening: false }));
 
 jest.mock('react-native-safe-area-context', () => (jest.requireActual('react-native-safe-area-context/jest/mock') as { default: object }).default);
 jest.mock('expo-router', () => ({ router: { push: (...args: unknown[]) => mockPush(...args), back: jest.fn() }, useFocusEffect: () => undefined }));
@@ -18,7 +21,14 @@ jest.mock('@/lib/use-recording', () => ({
   useRecording: () => ({ phase: 'idle', durationMs: 0, error: null, start: jest.fn(), stop: jest.fn(), cancel: jest.fn() }),
 }));
 jest.mock('@/lib/entries-store', () => ({
-  useEntries: () => ({ entries: [], syncState: { note: null, at: null, waitingDeletes: 0 }, retry: jest.fn(), busy: new Set() }),
+  useEntries: () => ({ entries: [], syncState: { note: null, at: null, waitingDeletes: 0 }, retry: jest.fn(), busy: new Set(), cloudAllowed: () => true }),
+}));
+jest.mock('@/lib/storage', () => ({ loadSessionMinutes: () => 60, saveSessionMinutes: (m: number) => mockSaveMinutes(m) }));
+jest.mock('@/modules/wispra-keyboard-bridge', () => ({
+  startSession: (m: number) => mockStartSession(m),
+  endSession: async () => ({ active: false, until: 0, listening: false }),
+  sessionState: async () => ({ active: false, until: 0, listening: false }),
+  onSessionState: () => ({ remove: () => undefined }),
 }));
 jest.mock('@/lib/transcriber', () => ({ transcriptionAvailable: () => true }));
 jest.mock('@/lib/cloud-history', () => ({ readUsage: () => new Promise(() => undefined) }));
@@ -29,12 +39,16 @@ jest.mock('@/lib/sign-in', () => ({ signInWithGoogle: jest.fn() }));
 import AccountScreen from '@/app/(tabs)/account';
 // eslint-disable-next-line import/first
 import DictateScreen from '@/app/(tabs)/dictate';
+// eslint-disable-next-line import/first
+import KeyboardSessionScreen from '@/app/keyboard-session';
 
 const iphone: SetupState = { platform: 'ios', signedIn: true, keyboard: { enabled: true, lastSeenAt: null }, bubbleOn: false, waiting: 0 };
 const android: SetupState = { platform: 'android', signedIn: true, keyboard: null, bubbleOn: false, waiting: 0 };
 
 beforeEach(() => {
   mockPush.mockClear();
+  mockSaveMinutes.mockClear();
+  mockStartSession.mockClear();
   mockSetup = iphone;
 });
 afterEach(() => {
@@ -74,5 +88,36 @@ describe('Account › Dictate in other apps', () => {
     await fireEvent.press(screen.getByText('Wispra keyboard'));
     await fireEvent.press(screen.getByText('Mic button'));
     expect(mockPush.mock.calls).toEqual([['/keyboard-setup'], ['/dictation-setup']]);
+  });
+});
+
+describe('the listening session the keyboard mic opens (T-0163)', () => {
+  it('starts at once with the length saved in Account, with no length to choose', async () => {
+    await render(<KeyboardSessionScreen />);
+    expect(mockStartSession.mock.calls).toEqual([[60]]);
+    for (const choice of [/^5 min$/, /^15 min$/, /^1 hour$/, /Session length/]) expect(screen.queryByText(choice)).toBeNull();
+  });
+
+  it('says first how to go back to the app being typed in', async () => {
+    await render(<KeyboardSessionScreen />);
+    expect(await screen.findByText('Tap ◀ up here to go back to your app')).toBeTruthy();
+    expect(screen.getByText(/change it in Account/)).toBeTruthy();
+  });
+
+  it('is chosen in Account › Listening session, on iPhone only', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    await render(<AccountScreen />);
+    await fireEvent.press(screen.getByText('Listening session'));
+    const buttons = (alert.mock.calls[0]?.[2] ?? []) as { text?: string; onPress?: () => void }[];
+    expect(buttons.map((b) => b.text)).toEqual(['15 min', '1 hour', '4 hours', 'Cancel']);
+    await act(async () => buttons[2].onPress?.());
+    expect(mockSaveMinutes).toHaveBeenCalledWith(240);
+    expect(await screen.findByText('4 hours')).toBeTruthy();
+  });
+
+  it('has no listening session row on Android (its keyboard uses the microphone itself)', async () => {
+    mockSetup = android;
+    await render(<AccountScreen />);
+    expect(screen.queryByText('Listening session')).toBeNull();
   });
 });

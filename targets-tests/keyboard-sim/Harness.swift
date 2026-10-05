@@ -138,8 +138,53 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
       keyboard.beginAppearanceTransition(false, animated: false)
       keyboard.endAppearanceTransition()
-      print("KEYBOARD HARNESS OK")
-      exit(0)
+      keyboard.willMove(toParent: nil)
+      keyboard.view.removeFromSuperview()
+      keyboard.removeFromParent()
+      runThroughSharedKeychain(in: host)
     }
+  }
+
+  /// T-0163: during a session Wispra runs in the background, where iOS refuses it the pasteboard, so
+  /// the status and the words go through the shared keychain. The app side here is the real one
+  /// (KeyboardSession.deliver); the pasteboards are then emptied, as they are on the iPhone while
+  /// Wispra is in the background, and the keyboard must still see the session and type the words.
+  static func runThroughSharedKeychain(in host: UIViewController) {
+    check(SharedChannel.accessGroup == "TEST.com.sinhgiang.wispramobile.shared", "the shared keychain group is named from the team prefix")
+    let now = Date().timeIntervalSince1970 * 1000
+    check(SharedChannel.write(.session, "{\"until\": \(now + 10 * 60 * 1000), \"beat\": \(now)}"), "the app writes the session status to the shared keychain")
+    SharedChannel.remove(.chunks)
+    check(KeyboardSession.shared.deliver(utterance: "t2", index: 0, text: "họp lúc", last: false), "the app hands over a piece through the shared keychain")
+    check(KeyboardSession.shared.deliver(utterance: "t2", index: 1, text: "2 giờ", last: true), "and the last piece")
+    let stored = ChunkQueue.parse(SharedChannel.read(.chunks)).filter { $0.utterance == "t2" }
+    check(stored.map(\.text) == ["họp lúc", "2 giờ"] && stored.last?.last == true, "the keychain holds both pieces, in order")
+    // What the keyboard finds while Wispra is in the background: no pasteboard at all
+    for name in [KeyboardViewController.sessionPasteboardName, KeyboardViewController.chunksPasteboardName, KeyboardViewController.seenPasteboardName] {
+      UIPasteboard(name: name, create: true)?.string = ""
+    }
+    SharedChannel.remove(.seen)
+
+    let keyboard = KeyboardViewController()
+    host.addChild(keyboard)
+    keyboard.view.frame = CGRect(x: 0, y: host.view.bounds.height - 270, width: host.view.bounds.width, height: 270)
+    host.view.addSubview(keyboard.view)
+    keyboard.didMove(toParent: host)
+    keyboard.beginAppearanceTransition(true, animated: false)
+    keyboard.endAppearanceTransition()
+    keyboard.view.layoutIfNeeded()
+
+    check(Double(SharedChannel.read(.seen) ?? "") != nil, "the keyboard notes it was on screen in the shared keychain (Account: In use)")
+    let undo = buttons(in: keyboard.view).compactMap { $0 as? UIButton }.first { $0.title(for: .normal) == "Hoàn tác" }
+    check(undo?.isHidden == false, "the keyboard typed the pieces from the shared keychain (Undo shows)")
+    let mic = buttons(in: keyboard.view).compactMap { $0 as? UIButton }.first { $0.accessibilityLabel == "Speak with Wispra" }
+    mic?.sendActions(for: .touchUpInside)
+    check(mic?.accessibilityLabel == "Listening. Tap to type what you said", "the session from the shared keychain is live: the mic turns red")
+    mic?.sendActions(for: .touchUpInside)
+    check(mic?.accessibilityLabel == "Speak with Wispra", "tapped again: purple, waiting for the words")
+
+    keyboard.beginAppearanceTransition(false, animated: false)
+    keyboard.endAppearanceTransition()
+    print("KEYBOARD HARNESS OK")
+    exit(0)
   }
 }

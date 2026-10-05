@@ -79,6 +79,7 @@ describe('"Dictate in other apps" in Account (T-0154)', () => {
     const rows = otherAppsRows({ ...ownersIphone, keyboard: { enabled: false, lastSeenAt: null } });
     expect(rows.map((r) => [r.label, r.target])).toEqual([
       ['Wispra keyboard', 'ios-settings'],
+      ['Listening session', 'session-length'],
       ['How the keyboard works', '/welcome'],
     ]);
     expect(rows[0]).toMatchObject({ value: 'Turn on', attention: true });
@@ -99,7 +100,7 @@ describe('"Dictate in other apps" in Account (T-0154)', () => {
   it('leads only to screens that exist, so none of them is left without a way in', () => {
     const screens = [...otherAppsRows(ownersIphone), ...otherAppsRows(android)]
       .map((r) => r.target)
-      .filter((t) => t !== 'ios-settings');
+      .filter((t) => t !== 'ios-settings' && t !== 'session-length');
     expect(screens.sort()).toEqual(['/dictation-setup', '/keyboard-setup', '/welcome']);
     for (const screen of screens) expect(existsSync(join(__dirname, '..', '..', 'app', `${screen.slice(1)}.tsx`))).toBe(true);
   });

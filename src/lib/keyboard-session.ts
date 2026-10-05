@@ -30,9 +30,20 @@ export function wordsFrom(result: TranscribeResult): string {
   return result.ok ? result.text.trim() : '';
 }
 
-// The durations a session can last, in minutes
-export const SESSION_CHOICES = [5, 15, 60] as const;
-export const DEFAULT_SESSION_MINUTES = 15;
+// How long a session lasts, in minutes (T-0163): chosen once in Account, never each time the mic
+// opens Wispra. Each use of the keyboard's mic starts the count again, so a session in use goes on.
+export const SESSION_CHOICES = [15, 60, 240] as const;
+export const DEFAULT_SESSION_MINUTES = 60;
+
+export function sessionLabel(minutes: number): string {
+  return minutes >= 60 ? `${minutes / 60} hour${minutes === 60 ? '' : 's'}` : `${minutes} min`;
+}
+
+// The saved length, read back: one of the choices, or the default
+export function parseSessionMinutes(text: string | null): number {
+  const n = Number(text?.trim());
+  return (SESSION_CHOICES as readonly number[]).includes(n) ? n : DEFAULT_SESSION_MINUTES;
+}
 
 export function minutesLeft(until: number, now: number): number {
   return until > now ? Math.ceil((until - now) / 60_000) : 0;

@@ -12,7 +12,10 @@ import UIKit
 /// words back to the keyboard. Audio outside red-mic moments is never kept or sent.
 ///
 /// Keyboard → app: Darwin notifications ".start", ".stop", ".cancel" (no App Group needed).
-/// App → keyboard: the named pasteboards ".session" (status) and ".chunks" (words), plus ".text".
+/// App → keyboard: the shared keychain items "session" (status) and "chunks" (words), see
+/// SharedChannel.swift, plus the Darwin notification ".text". Not the pasteboard: iOS refuses it to
+/// an app in the background, which Wispra is during a session (T-0163). The pasteboards are still
+/// written as well, for keyboards from earlier builds, and work while Wispra is open.
 final class KeyboardSession {
   static let shared = KeyboardSession()
 
@@ -30,6 +33,8 @@ final class KeyboardSession {
   private var running = false
   private var observing = false
   private var until = Date.distantPast
+  /// How long a session lasts; each use of the keyboard's mic starts the count again
+  private var minutes: Double = 60
   private var heartbeat: Timer?
 
   // Touched on `queue` only
@@ -66,7 +71,8 @@ final class KeyboardSession {
       running = true
     }
     observeKeyboard()
-    until = Date().addingTimeInterval(max(1, minutes) * 60)
+    self.minutes = max(1, minutes)
+    until = Date().addingTimeInterval(self.minutes * 60)
     heartbeat?.invalidate()
     heartbeat = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
       guard let self = self else { return }
@@ -102,6 +108,8 @@ final class KeyboardSession {
 
   func beginListening() {
     guard running, until > Date() else { return }
+    // A session in use goes on: the count starts again from now
+    until = max(until, Date().addingTimeInterval(minutes * 60))
     queue.async {
       if self.listening { return }
       self.utterance = UUID().uuidString
@@ -132,21 +140,28 @@ final class KeyboardSession {
 
   // MARK: Words back to the keyboard
 
-  /// Adds a transcribed piece to the list the keyboard reads, and wakes the keyboard
+  /// Adds a transcribed piece to the list the keyboard reads, and wakes the keyboard. True when the
+  /// words are stored where the keyboard reads them (the shared keychain).
   func deliver(utterance: String, index: Int, text: String, last: Bool) -> Bool {
-    guard let pasteboard = UIPasteboard(name: Self.chunksPasteboard, create: true) else { return false }
-    var list: [[String: Any]] = []
-    if let data = pasteboard.string?.data(using: .utf8),
-       let old = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-      list = old
-    }
-    list.append(["u": utterance, "i": index, "text": text, "at": Date().timeIntervalSince1970 * 1000, "last": last])
-    // The keyboard only needs the recent ones
-    if list.count > 40 { list.removeFirst(list.count - 40) }
-    guard let data = try? JSONSerialization.data(withJSONObject: list), let json = String(data: data, encoding: .utf8) else { return false }
-    pasteboard.setItems([["public.utf8-plain-text": json]], options: [.expirationDate: Date().addingTimeInterval(15 * 60)])
+    let json = Self.appendChunk(to: SharedChannel.read(.chunks), utterance: utterance, index: index, text: text, last: last, nowMs: Date().timeIntervalSince1970 * 1000)
+    let stored = SharedChannel.write(.chunks, json)
+    // Works only while Wispra is open; kept for keyboards of earlier builds
+    UIPasteboard(name: Self.chunksPasteboard, create: true)?.setItems(
+      [["public.utf8-plain-text": json]], options: [.expirationDate: Date().addingTimeInterval(15 * 60)])
     post("text")
-    return true
+    return stored
+  }
+
+  /// The list of pieces with this one added; the keyboard only needs the recent ones
+  static func appendChunk(to old: String?, utterance: String, index: Int, text: String, last: Bool, nowMs: Double) -> String {
+    var list: [[String: Any]] = []
+    if let data = old?.data(using: .utf8), let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+      list = parsed
+    }
+    list.append(["u": utterance, "i": index, "text": text, "at": nowMs, "last": last])
+    if list.count > 40 { list.removeFirst(list.count - 40) }
+    guard let data = try? JSONSerialization.data(withJSONObject: list), let json = String(data: data, encoding: .utf8) else { return "[]" }
+    return json
   }
 
   // MARK: Audio (on `queue`)
@@ -226,15 +241,17 @@ final class KeyboardSession {
 
   // MARK: Talking to the keyboard
 
+  /// The beat the keyboard checks (every 5 seconds, in the background too): a session whose beat
+  /// stops is over for the keyboard
   private func writeStatus() {
-    guard let pasteboard = UIPasteboard(name: Self.sessionPasteboard, create: true) else { return }
     let status: [String: Any] = [
       "until": running ? until.timeIntervalSince1970 * 1000 : 0,
       "beat": Date().timeIntervalSince1970 * 1000,
       "listening": queue.sync { listening },
     ]
     guard let data = try? JSONSerialization.data(withJSONObject: status), let json = String(data: data, encoding: .utf8) else { return }
-    pasteboard.setItems([["public.utf8-plain-text": json]], options: [:])
+    SharedChannel.write(.session, json)
+    UIPasteboard(name: Self.sessionPasteboard, create: true)?.setItems([["public.utf8-plain-text": json]], options: [:])
   }
 
   private func post(_ name: String) {

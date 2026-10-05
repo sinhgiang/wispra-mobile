@@ -5,6 +5,9 @@
   <!-- Same declaration as the app (app.json): only the standard HTTPS of iOS is used -->
   <key>ITSAppUsesNonExemptEncryption</key>
   <false/>
+  <!-- The team prefix ("AY64ZULZ5R."), to name the keychain group shared with the app (SharedChannel.swift) -->
+  <key>AppIdentifierPrefix</key>
+  <string>$(AppIdentifierPrefix)</string>
   <key>NSExtension</key>
   <dict>
     <key>NSExtensionPointIdentifier</key>

@@ -4,6 +4,8 @@
 <dict>
   <key>CFBundleIdentifier</key>
   <string>com.sinhgiang.wispra.keyboardharness</string>
+  <key>AppIdentifierPrefix</key>
+  <string>TEST.</string>
   <key>CFBundleExecutable</key>
   <string>Harness</string>
   <key>CFBundleName</key>

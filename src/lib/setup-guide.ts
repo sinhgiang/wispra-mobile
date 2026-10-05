@@ -3,6 +3,8 @@
 // into text before signing in to Wispra Cloud, so the app says plainly what is missing and leads
 // there. Pure functions; the screens read the state and show what comes out.
 
+import { DEFAULT_SESSION_MINUTES, sessionLabel } from './keyboard-session';
+
 export type SetupPlatform = 'ios' | 'android';
 
 export interface SetupState {
@@ -76,11 +78,11 @@ export function setupReminders(state: SetupState, screen: 'dictate' | 'meetings'
 }
 
 // Where a row of "Dictate in other apps" leads: iPhone's Settings page of Wispra (where its keyboard
-// is turned on), or a screen of the app
-export type OtherAppsTarget = 'ios-settings' | '/welcome' | '/keyboard-setup' | '/dictation-setup';
+// is turned on), the choice of the listening session's length, or a screen of the app
+export type OtherAppsTarget = 'ios-settings' | 'session-length' | '/welcome' | '/keyboard-setup' | '/dictation-setup';
 
 export interface OtherAppsRow {
-  id: 'keyboard' | 'keyboard-guide' | 'mic-button';
+  id: 'keyboard' | 'session-length' | 'keyboard-guide' | 'mic-button';
   label: string;
   // On / Turn on, when the app knows; nothing when it cannot tell
   value: string | null;
@@ -91,9 +93,11 @@ export interface OtherAppsRow {
 }
 
 // Dictating into other apps, as small rows in Account (T-0154: the owner wants none of it on
-// Dictate). iPhone: the Wispra keyboard opens Settings › Wispra straight away, and the guide stays
-// one tap away. Android: the Wispra keyboard and the mic button, each to its own setup screen.
-export function otherAppsRows(state: SetupState): OtherAppsRow[] {
+// Dictate). iPhone: the Wispra keyboard opens Settings › Wispra straight away, the listening
+// session's length is chosen here once (T-0163: never each time the mic opens Wispra), and the guide
+// stays one tap away. Android: the Wispra keyboard and the mic button, each to its own setup screen
+// (Android keyboards use the microphone themselves: no session there).
+export function otherAppsRows(state: SetupState, sessionMinutes: number = DEFAULT_SESSION_MINUTES): OtherAppsRow[] {
   if (state.platform === 'ios') {
     const added = keyboardAdded(state);
     // In use: it has been on screen (it notes when, with full access). On but never on screen after
@@ -106,6 +110,14 @@ export function otherAppsRows(state: SetupState): OtherAppsRow[] {
         attention: !added,
         target: 'ios-settings',
         accessibilityLabel: 'Wispra keyboard: opens Settings, Wispra, Keyboards',
+      },
+      {
+        id: 'session-length',
+        label: 'Listening session',
+        value: sessionLabel(sessionMinutes),
+        attention: false,
+        target: 'session-length',
+        accessibilityLabel: `The keyboard's listening session lasts ${sessionLabel(sessionMinutes)}. Change it`,
       },
       {
         id: 'keyboard-guide',

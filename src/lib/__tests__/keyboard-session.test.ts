@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { actionFor, DEFAULT_SESSION_MINUTES, minutesLeft, SESSION_CHOICES, wordsFrom } from '../keyboard-session';
+import { actionFor, DEFAULT_SESSION_MINUTES, minutesLeft, parseSessionMinutes, SESSION_CHOICES, sessionLabel, wordsFrom } from '../keyboard-session';
 
 describe('each piece of a listening session', () => {
   it('is transcribed when something was said and Wispra Cloud may be used', () => {
@@ -22,9 +22,18 @@ describe('each piece of a listening session', () => {
 });
 
 describe('the session length', () => {
-  it('offers 5 minutes, 15 minutes and an hour, 15 by default', () => {
-    expect(SESSION_CHOICES).toEqual([5, 15, 60]);
-    expect(DEFAULT_SESSION_MINUTES).toBe(15);
+  it('is chosen once in Account (T-0163): 15 minutes, 1 hour or 4 hours, 1 hour by default', () => {
+    expect(SESSION_CHOICES).toEqual([15, 60, 240]);
+    expect(DEFAULT_SESSION_MINUTES).toBe(60);
+    expect(SESSION_CHOICES.map(sessionLabel)).toEqual(['15 min', '1 hour', '4 hours']);
+  });
+
+  it('reads the saved length back, and falls back to 1 hour for anything else', () => {
+    expect(parseSessionMinutes('240')).toBe(240);
+    expect(parseSessionMinutes(' 15\n')).toBe(15);
+    expect(parseSessionMinutes(null)).toBe(60);
+    expect(parseSessionMinutes('5')).toBe(60);
+    expect(parseSessionMinutes('abc')).toBe(60);
   });
 
   it('counts the minutes left, rounded up', () => {

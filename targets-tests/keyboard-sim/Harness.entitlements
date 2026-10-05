@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Like the app and the keyboard: its own group first, then the group they share
+       (SharedChannel.swift). TEST is the team prefix of this simulator-only app. -->
+  <key>application-identifier</key>
+  <string>TEST.com.sinhgiang.wispra.keyboardharness</string>
+  <key>keychain-access-groups</key>
+  <array>
+    <string>TEST.com.sinhgiang.wispra.keyboardharness</string>
+    <string>TEST.com.sinhgiang.wispramobile.shared</string>
+  </array>
+</dict>
+</plist>
