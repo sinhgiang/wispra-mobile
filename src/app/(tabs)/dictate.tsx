@@ -10,9 +10,7 @@ import { Gap, W } from '@/constants/wispra';
 import { formatDuration, sortEntries } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
 import { transcriptionAvailable } from '@/lib/transcriber';
-import { anyAppButton } from '@/lib/setup-guide';
 import { useRecording } from '@/lib/use-recording';
-import { useSetupState } from '@/lib/use-setup';
 
 export default function DictateScreen() {
   const rec = useRecording('dictation');
@@ -31,10 +29,9 @@ export default function DictateScreen() {
   return (
     <SafeAreaView edges={['top']} style={ui.screen}>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.titleRow}>
-          <Title>Dictate</Title>
-          <AnyAppButtonView />
-        </View>
+        <Title>Dictate</Title>
+        {/* Only the sign-in reminder, while signed out. The keyboard (iPhone) and the mic button
+            (Android) are set up from Account (T-0154). */}
         <SetupReminders screen="dictate" />
 
         <Card style={styles.recorder}>
@@ -72,7 +69,6 @@ export default function DictateScreen() {
           ) : null}
         </Card>
 
-
         {recent.length > 0 ? (
           <View style={styles.list}>
             <Label>Recent dictations</Label>
@@ -86,27 +82,7 @@ export default function DictateScreen() {
   );
 }
 
-// Dictating into other apps, as a small button at the top (T-0154): iPhone, the Wispra keyboard
-// guide; Android, the mic button's setup. A dot shows while something is still to set up.
-function AnyAppButtonView() {
-  const button = anyAppButton(useSetupState());
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={button.accessibilityLabel}
-      onPress={() => router.push(button.target === 'guide' ? '/welcome' : '/dictation-setup')}
-      style={styles.anyApp}>
-      <Text style={styles.anyAppText}>{button.label}</Text>
-      {button.attention ? <View style={styles.anyAppDot} /> : null}
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  anyApp: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, borderRadius: 16, borderWidth: 1, borderColor: W.lineStrong, backgroundColor: W.surface },
-  anyAppText: { color: W.text, fontSize: 13, fontWeight: '600' },
-  anyAppDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: W.amber },
   content: { padding: Gap.xl, paddingTop: Gap.xl + 16, gap: Gap.l },
   recorder: { alignItems: 'center', paddingVertical: 28, gap: Gap.l },
   mic: { width: 88, height: 88, borderRadius: 44, backgroundColor: W.accent, alignItems: 'center', justifyContent: 'center' },

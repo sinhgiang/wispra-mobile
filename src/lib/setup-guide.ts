@@ -57,8 +57,8 @@ function recordings(n: number): string {
 }
 
 // What is missing, said where it matters: the sign-in on Dictate and Meetings. The keyboard (iPhone)
-// and the mic button (Android) are behind the small button at the top of Dictate (anyAppButton),
-// so the tab keeps only the mic and the recent dictations (T-0154).
+// and the mic button (Android) are small rows in Account (otherAppsRows), so Dictate keeps only the
+// mic and the recent dictations (T-0154).
 export function setupReminders(state: SetupState, screen: 'dictate' | 'meetings'): Reminder[] {
   const out: Reminder[] = [];
   if (!state.signedIn) {
@@ -75,30 +75,64 @@ export function setupReminders(state: SetupState, screen: 'dictate' | 'meetings'
   return out;
 }
 
-export interface AnyAppButton {
+// Where a row of "Dictate in other apps" leads: iPhone's Settings page of Wispra (where its keyboard
+// is turned on), or a screen of the app
+export type OtherAppsTarget = 'ios-settings' | '/welcome' | '/keyboard-setup' | '/dictation-setup';
+
+export interface OtherAppsRow {
+  id: 'keyboard' | 'keyboard-guide' | 'mic-button';
   label: string;
-  // Something is still to set up: the button shows a dot
+  // On / Turn on, when the app knows; nothing when it cannot tell
+  value: string | null;
+  // Something is still to set up: the row shows a dot
   attention: boolean;
-  // iPhone: the guide (keyboard); Android: the mic button's setup
-  target: 'guide' | 'mic-setup';
+  target: OtherAppsTarget;
   accessibilityLabel: string;
 }
 
-// The small button at the top of Dictate that leads to dictating into other apps
-export function anyAppButton(state: SetupState): AnyAppButton {
+// Dictating into other apps, as small rows in Account (T-0154: the owner wants none of it on
+// Dictate). iPhone: the Wispra keyboard opens Settings › Wispra straight away, and the guide stays
+// one tap away. Android: the Wispra keyboard and the mic button, each to its own setup screen.
+export function otherAppsRows(state: SetupState): OtherAppsRow[] {
   if (state.platform === 'ios') {
-    const ready = keyboardAdded(state) && keyboardUsed(state);
-    return {
-      label: 'Keyboard',
-      attention: !ready,
-      target: 'guide',
-      accessibilityLabel: ready ? 'Wispra keyboard: how to use it' : 'Set up the Wispra keyboard to dictate in any app',
-    };
+    const added = keyboardAdded(state);
+    // In use: it has been on screen (it notes when, with full access). On but never on screen after
+    // switching to it means iOS did not get to show it.
+    return [
+      {
+        id: 'keyboard',
+        label: 'Wispra keyboard',
+        value: keyboardUsed(state) ? 'In use' : added ? 'On' : 'Turn on',
+        attention: !added,
+        target: 'ios-settings',
+        accessibilityLabel: 'Wispra keyboard: opens Settings, Wispra, Keyboards',
+      },
+      {
+        id: 'keyboard-guide',
+        label: 'How the keyboard works',
+        value: null,
+        attention: false,
+        target: '/welcome',
+        accessibilityLabel: 'How the Wispra keyboard works',
+      },
+    ];
   }
-  return {
-    label: 'Mic button',
-    attention: !state.bubbleOn,
-    target: 'mic-setup',
-    accessibilityLabel: state.bubbleOn ? 'Wispra mic button settings' : 'Set up the Wispra mic button to dictate in any app',
-  };
+  return [
+    {
+      id: 'keyboard',
+      label: 'Wispra keyboard',
+      value: null,
+      attention: false,
+      target: '/keyboard-setup',
+      accessibilityLabel: 'Wispra keyboard: turn it on and choose it',
+    },
+    {
+      id: 'mic-button',
+      label: 'Mic button',
+      value: state.bubbleOn ? 'On' : 'Turn on',
+      attention: !state.bubbleOn,
+      target: '/dictation-setup',
+      accessibilityLabel: state.bubbleOn ? 'Wispra mic button settings' : 'Set up the Wispra mic button to dictate in any app',
+    },
+  ];
 }

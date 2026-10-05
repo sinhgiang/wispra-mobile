@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { createEntry, type Entry } from '../entries';
 import type { MeetingSegment } from '../meeting';
-import { emptyAudio, freeName, jobKey, nextJob, type QueueRules } from '../transcribe-queue';
+import { emptyAudio, freeName, jobKey, nextJob, runQueue, type Job, type JobOutcome, type QueueRules } from '../transcribe-queue';
 
 const rules: QueueRules = {
   readyToFinish: (e) => !!e.segments && e.status === 'pending' && !e.segments.some((s) => s.status === 'pending' || s.status === 'recording'),
@@ -50,6 +50,64 @@ describe('the transcription queue', () => {
     expect(nextJob([long], new Set(), rules)?.kind).toBe('split-piece');
     const done: Entry = { ...oldMeeting, segments: [piece('p1', 0, { status: 'done', text: 'Hi' })] };
     expect(nextJob([done], new Set(), rules)?.kind).toBe('finish-meeting');
+  });
+});
+
+// The loop the app runs (runQueue), with the real nextJob and the owner's list: what each job does
+// is played by a small fake store that changes the list as the app would
+describe('the queue loop the app runs', () => {
+  function store(list: Entry[], answer: (job: Job) => JobOutcome | 'no-change') {
+    let entries = list;
+    let allowed = true;
+    const run = async (job: Job): Promise<JobOutcome> => {
+      const outcome = answer(job);
+      if (outcome !== 'done') return outcome === 'later' ? 'later' : 'done';
+      entries = entries.map((e) => {
+        if (e.id !== job.entry.id) return e;
+        if (job.kind === 'transcribe-piece') return { ...e, segments: e.segments!.map((s) => (s.id === job.piece.id ? { ...s, status: 'done' as const, text: 'x' } : s)) };
+        if (job.kind === 'finish-meeting') return { ...e, status: 'done' as const };
+        return { ...e, status: 'done' as const, text: 'x' };
+      });
+      return 'done';
+    };
+    return {
+      opts: { allowed: () => allowed, pick: (skip: ReadonlySet<string>) => nextJob(entries, skip, rules), run },
+      stop: () => (allowed = false),
+      entries: () => entries,
+    };
+  }
+
+  it('does everything waiting, oldest first, then stops', async () => {
+    const s = store(phone, () => 'done');
+    expect(await runQueue(s.opts)).toEqual([
+      'mobile-m0#q1',
+      'mobile-m0:finish-meeting',
+      'mobile-m1#p1',
+      'mobile-m1#p2',
+      'mobile-m1:finish-meeting',
+      'mobile-d1:transcribe-entry',
+    ]);
+    expect(s.entries().every((e) => e.status === 'done')).toBe(true);
+  });
+
+  it('skips what failed for a passing reason and still reaches the dictation (the owner’s case)', async () => {
+    const s = store(phone, (job) => (job.kind === 'transcribe-piece' ? 'later' : 'done'));
+    const ran = await runQueue(s.opts);
+    expect(ran).toEqual(['mobile-m0#q1', 'mobile-m1#p1', 'mobile-m1#p2', 'mobile-d1:transcribe-entry']);
+    expect(s.entries().find((e) => e.id === 'mobile-d1')?.status).toBe('done');
+  });
+
+  it('ends even when a job changes nothing (a meeting that cannot be finished, a piece that cannot be cut)', async () => {
+    const stuck: Entry = { ...oldMeeting, segments: [piece('long', 0, { durationMs: 60_000 })] };
+    const s = store([stuck, dictation], (job) => (job.kind === 'split-piece' ? 'no-change' : 'done'));
+    expect(await runQueue(s.opts)).toEqual(['mobile-m1#long', 'mobile-d1:transcribe-entry']);
+  });
+
+  it('checks before every job that Wispra Cloud may still be used', async () => {
+    const s = store(phone, () => 'done');
+    const run = s.opts.run;
+    const ran = await runQueue({ ...s.opts, run: async (job) => (s.stop(), run(job)) });
+    expect(ran).toEqual(['mobile-m0#q1']);
   });
 });
 

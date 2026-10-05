@@ -1,4 +1,4 @@
-import { File } from 'expo-file-system';
+import { File, UploadType, type UploadOptions, type UploadResult } from 'expo-file-system';
 
 import { currentSession, validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
@@ -21,14 +21,40 @@ export function transcriptionAvailable(): boolean {
   return currentSession() !== null;
 }
 
-async function errorDetail(response: Response): Promise<string> {
+// Wispra Cloud's answer, as a result for the card. Pure, so it is tested.
+export function resultFromResponse(status: number, body: string): TranscribeResult {
+  let json: unknown = null;
   try {
-    const body = (await response.json()) as { error?: unknown };
-    return typeof body.error === 'string' ? body.error : '';
+    json = JSON.parse(body);
   } catch {
-    return '';
+    json = null;
   }
+  const error = json && typeof json === 'object' ? (json as { error?: unknown }).error : undefined;
+  const detail = typeof error === 'string' ? error : '';
+  if (status < 200 || status >= 300) {
+    if (status === 401) return { ok: false, error: 'Your Wispra Cloud sign-in has expired. Sign in again in Account.' };
+    if (status === 402) return { ok: false, error: detail || 'This month’s free Wispra Cloud minutes are used up.' };
+    if (status === 413) return { ok: false, error: 'This recording is too large for Wispra Cloud in one piece.' };
+    return {
+      ok: false,
+      error: detail ? `Wispra Cloud: ${detail}` : `Transcription failed (HTTP ${status}).`,
+      transient: status === 429 || status >= 500,
+    };
+  }
+  if (!json || typeof json !== 'object') {
+    return { ok: false, error: 'Wispra Cloud sent an answer that could not be read. It is tried again by itself.', transient: true };
+  }
+  const text = cleanTranscript(json as VerboseTranscript);
+  if (!text) return { ok: false, error: 'No speech was heard in this recording.' };
+  return { ok: true, text };
 }
+
+// What transcribing needs from an audio file (the real one is expo-file-system's File)
+export type AudioFile = {
+  readonly exists: boolean;
+  readonly size: number | null;
+  upload(url: string, options?: UploadOptions): Promise<UploadResult>;
+};
 
 export async function transcribe(entry: Entry): Promise<TranscribeResult> {
   return transcribeAudio(entry.audioUri, entry.durationMs);
@@ -37,9 +63,17 @@ export async function transcribe(entry: Entry): Promise<TranscribeResult> {
 // One audio file: a dictation, a meeting recorded before part 3, or one piece of a meeting
 export async function transcribeAudio(uri: string | null, durationMs: number): Promise<TranscribeResult> {
   if (!uri) return { ok: false, error: 'The audio file is not on this phone.' };
-  const audio = new File(uri);
+  return transcribeFile(new File(uri), durationMs, validToken);
+}
+
+// The file is sent by the phone's own uploader (URLSession on iPhone, OkHttp on Android), straight
+// from the disk. It used to go through fetch with a FormData part { uri, name, type }: Expo SDK 57
+// replaces fetch with expo/fetch, which does not take such a part and throws before anything is
+// sent ("Unsupported FormDataPart implementation", expo/src/winter/fetch/convertFormData.ts), so no
+// recording ever reached Wispra Cloud and every card said there was no connection (T-0154).
+export async function transcribeFile(audio: AudioFile, durationMs: number, token: () => Promise<string | null>): Promise<TranscribeResult> {
   if (!audio.exists) return { ok: false, error: 'The audio file is not on this phone.' };
-  // Nothing was recorded in it: sending it would fail on the phone and look like a lost connection
+  // Nothing was recorded in it: nothing worth sending
   if (emptyAudio(audio.size)) return { ok: false, error: 'No audio was recorded in this file.' };
   if ((audio.size ?? 0) > CLOUD_UPLOAD_MAX_BYTES) {
     return {
@@ -47,56 +81,40 @@ export async function transcribeAudio(uri: string | null, durationMs: number): P
       error: 'This recording is longer than Wispra Cloud takes in one piece (about 17 minutes). The audio is kept; meetings recorded from now on are sent in pieces.',
     };
   }
-  const token = await validToken();
-  if (!token) return { ok: false, error: 'Sign in to Wispra Cloud in Account to transcribe. The audio is kept on this phone.', transient: true };
-
-  const form = new FormData();
-  // React Native uploads a local file from its uri
-  form.append('file', { uri: audio.uri, name: 'audio.m4a', type: 'audio/mp4' } as unknown as Blob);
-  form.append('model', MODEL);
-  form.append('response_format', 'verbose_json');
+  const bearer = await token();
+  if (!bearer) return { ok: false, error: 'Sign in to Wispra Cloud in Account to transcribe. The audio is kept on this phone.', transient: true };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  let response: Response;
+  let response: UploadResult;
   try {
-    response = await fetch(`${cloud.apiBase}/api/transcribe`, {
-      method: 'POST',
+    response = await audio.upload(`${cloud.apiBase}/api/transcribe`, {
+      httpMethod: 'POST',
+      uploadType: UploadType.MULTIPART,
+      fieldName: 'file',
+      mimeType: 'audio/mp4',
+      parameters: { model: MODEL, response_format: 'verbose_json' },
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${bearer}`,
         // The server counts this toward the monthly minutes
         ...(durationMs > 0 ? { 'X-Audio-Duration-Seconds': String(Math.ceil(durationMs / 1000)) } : {}),
       },
-      body: form,
+      // Sent now, while the app is open; a background session may wait for a better moment
+      sessionType: 'foreground',
       signal: controller.signal,
     });
   } catch (err) {
-    const timedOut = err instanceof Error && err.name === 'AbortError';
+    const timedOut = controller.signal.aborted;
     const why = err instanceof Error && err.message ? ` (${err.message})` : '';
     return {
       ok: false,
       error: timedOut
-        ? 'Transcription timed out. Check your connection and try again.'
+        ? 'Transcription timed out. Check your connection; it is tried again by itself.'
         : `Could not reach Wispra Cloud${why}. The audio is kept; it is tried again by itself.`,
       transient: true,
     };
   } finally {
     clearTimeout(timer);
   }
-
-  if (!response.ok) {
-    const detail = await errorDetail(response);
-    if (response.status === 401) return { ok: false, error: 'Your Wispra Cloud sign-in has expired. Sign in again in Account.' };
-    if (response.status === 402) return { ok: false, error: detail || 'This month’s free Wispra Cloud minutes are used up.' };
-    if (response.status === 413) return { ok: false, error: 'This recording is too large for Wispra Cloud in one piece.' };
-    return {
-      ok: false,
-      error: detail ? `Wispra Cloud: ${detail}` : `Transcription failed (HTTP ${response.status}).`,
-      transient: response.status === 429 || response.status >= 500,
-    };
-  }
-
-  const text = cleanTranscript((await response.json()) as VerboseTranscript);
-  if (!text) return { ok: false, error: 'No speech was heard in this recording.' };
-  return { ok: true, text };
+  return resultFromResponse(response.status, response.body);
 }

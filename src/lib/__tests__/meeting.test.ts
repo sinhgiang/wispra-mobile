@@ -2,6 +2,8 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   extractJson,
+  finishedMeeting,
+  NO_SOUND_IN_MEETING,
   formatLine,
   locate,
   meetingStatus,
@@ -18,6 +20,7 @@ import {
   transcriptLines,
   type MeetingSegment,
 } from '../meeting';
+import { createEntry, previewText } from '../entries';
 
 function seg(over: Partial<MeetingSegment>): MeetingSegment {
   return { id: 's', uri: 'file:///s.m4a', startMs: 0, durationMs: 30_000, status: 'done', text: null, error: null, ...over };
@@ -154,5 +157,20 @@ describe('reading AI answers', () => {
     expect(merged.topics?.map((t) => t.title)).toEqual(['Results', 'Budget']);
     expect(merged.actions?.map((a) => a.text)).toEqual(['Send the list', 'Call Minh']);
     expect(merged.liveRefs).toBe(3);
+  });
+});
+
+describe('a meeting once its pieces are through (T-0154 review)', () => {
+  it('says so when no piece had any sound, instead of looking done and empty', () => {
+    const silent = [seg({ id: 'a', text: '' }), seg({ id: 'b', startMs: 30_000, text: '' })];
+    expect(finishedMeeting(silent)).toEqual({ status: 'done', text: null, error: NO_SOUND_IN_MEETING });
+    const meeting = { ...createEntry('meeting', new Date(2026, 9, 5, 6, 30), 'm'), durationMs: 60_000, ...finishedMeeting(silent) };
+    expect(previewText(meeting)).toBe(`1:00 · ${NO_SOUND_IN_MEETING}`);
+  });
+
+  it('keeps the words of a meeting with sound, and asks to try again when a piece failed', () => {
+    expect(finishedMeeting([seg({ text: 'Chào cả nhà' }), seg({ id: 'b', text: '' })])).toEqual({ status: 'done', text: 'Chào cả nhà', error: null });
+    expect(finishedMeeting([seg({ text: 'Chào' }), seg({ id: 'b', status: 'failed' })])).toMatchObject({ status: 'failed', error: expect.stringContaining('Try again') });
+    expect(finishedMeeting([seg({ status: 'pending' })])).toEqual({ status: 'pending', text: null, error: null });
   });
 });

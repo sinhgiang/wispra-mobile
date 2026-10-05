@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Body, Button, Card, Title, ui } from '@/components/wispra/ui';
@@ -10,7 +10,9 @@ import { signOut } from '@/lib/cloud-auth';
 import { readUsage, type Usage } from '@/lib/cloud-history';
 import { formatDuration, formatTime, needsTranscription } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
+import { otherAppsRows, type OtherAppsTarget } from '@/lib/setup-guide';
 import { signInWithGoogle } from '@/lib/sign-in';
+import { useSetupState } from '@/lib/use-setup';
 import { useSession } from '@/lib/use-session';
 
 export default function AccountScreen() {
@@ -81,6 +83,8 @@ export default function AccountScreen() {
 
         {session ? <UsageCard /> : null}
 
+        <OtherApps />
+
         <View style={styles.rows}>
           <Row label="Saved on this phone" value={`${stats.count}`} />
           {session ? (
@@ -100,6 +104,39 @@ export default function AccountScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+// Dictating into other apps (T-0154): small rows here instead of cards on Dictate. On iPhone the
+// keyboard row opens Wispra's page in Settings, where its keyboard is turned on.
+function OtherApps() {
+  const rows = otherAppsRows(useSetupState());
+  const open = (target: OtherAppsTarget) => {
+    if (target === 'ios-settings') void Linking.openSettings();
+    else router.push(target);
+  };
+  return (
+    <View style={styles.group}>
+      <Text style={styles.groupLabel}>Dictate in other apps</Text>
+      <View style={styles.rows}>
+        {rows.map((r, i) => (
+          <Pressable
+            key={r.id}
+            accessibilityRole="button"
+            accessibilityLabel={r.accessibilityLabel}
+            onPress={() => open(r.target)}
+            style={[styles.row, i < rows.length - 1 && styles.rowLine]}>
+            <Text style={styles.rowLabel}>{r.label}</Text>
+            <View style={styles.rowEnd}>
+              {r.attention ? <View style={styles.dot} /> : null}
+              {r.value ? <Text style={styles.rowValue}>{r.value}</Text> : null}
+              <Text style={styles.chevron}>›</Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+      {rows[0]?.target === 'ios-settings' ? <Text style={styles.hint}>In Settings: Keyboards › Wispra on, and Allow Full Access.</Text> : null}
+    </View>
   );
 }
 
@@ -182,4 +219,10 @@ const styles = StyleSheet.create({
   rowLine: { borderBottomWidth: 1, borderBottomColor: W.line },
   rowLabel: { color: W.text, fontSize: 14 },
   rowValue: { color: W.muted, fontSize: 13 },
+  group: { gap: Gap.s },
+  groupLabel: { color: W.muted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, paddingHorizontal: 4 },
+  rowEnd: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: W.amber },
+  chevron: { color: W.muted, fontSize: 18 },
+  hint: { color: W.muted, fontSize: 12, lineHeight: 17, paddingHorizontal: 4 },
 });

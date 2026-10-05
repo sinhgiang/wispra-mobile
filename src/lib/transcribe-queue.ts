@@ -1,9 +1,10 @@
-// How the transcription queue picks its next job (T-0154). Pure, so it is tested.
+// How the transcription queue picks and runs its jobs (T-0154). Pure, so it is tested.
 //
 // The owner's iPhone showed every recording "not transcribed yet" with no request ever reaching
-// Wispra Cloud: the queue always started from the oldest entry, and a passing failure there (a
-// piece whose upload failed on the phone) ended the whole run, so nothing after it was ever tried.
-// Now a job that fails for a passing reason is skipped for the rest of the run, and the others go on.
+// Wispra Cloud. Two causes: every upload failed on the phone itself (see transcriber.ts), and the
+// queue always started from the oldest entry, where a passing failure ended the whole run, so
+// nothing after it was ever tried. Now a job that fails for a passing reason is skipped for the
+// rest of the run, and the others go on.
 
 import type { Entry } from './entries';
 import { segmentsWaiting, type MeetingSegment } from './meeting';
@@ -52,6 +53,40 @@ export function nextJob(entries: Entry[], skip: ReadonlySet<string>, rules: Queu
     if (job) return job;
   }
   return null;
+}
+
+// What running one job came to: 'later' when it failed for a passing reason (no connection,
+// server busy), so it is left alone for the rest of this run
+export type JobOutcome = 'done' | 'later';
+
+// The queue's loop, as the app runs it. Before each job it checks that Wispra Cloud may still be
+// used (another account may have signed in meanwhile). A job that failed for a passing reason is
+// skipped for the rest of the run, and so is a job that comes back right after it ran (it changed
+// nothing, as a meeting that cannot be finished or a piece that cannot be cut), so the loop always
+// ends. Returns the jobs it ran, in order.
+export async function runQueue(opts: {
+  allowed: () => boolean;
+  pick: (skip: ReadonlySet<string>) => Job | null;
+  run: (job: Job) => Promise<JobOutcome>;
+}): Promise<string[]> {
+  const skip = new Set<string>();
+  const ran: string[] = [];
+  let last: string | null = null;
+  while (opts.allowed()) {
+    const job = opts.pick(skip);
+    if (!job) break;
+    const key = jobKey(job);
+    if (key === last) {
+      skip.add(key);
+      last = null;
+      continue;
+    }
+    const outcome = await opts.run(job);
+    ran.push(key);
+    if (outcome === 'later') skip.add(key);
+    last = key;
+  }
+  return ran;
 }
 
 // Less than this, the file holds no audio worth sending (an AAC file with nothing recorded is a

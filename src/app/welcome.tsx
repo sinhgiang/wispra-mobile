@@ -10,7 +10,7 @@ import { signInWithGoogle } from '@/lib/sign-in';
 import { useSetupState } from '@/lib/use-setup';
 
 // The first-run guide (T-0145): each step with a picture, ticked off as it gets done. Opens by
-// itself the first time Wispra starts; the reminders on Dictate open it again.
+// itself the first time Wispra starts; Account › How the keyboard works opens it again.
 export default function WelcomeScreen() {
   const state = useSetupState();
   const steps = setupSteps(state);

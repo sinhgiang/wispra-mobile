@@ -178,6 +178,19 @@ export function meetingStatus(segments: MeetingSegment[]): 'pending' | 'failed' 
   return 'done';
 }
 
+export const NO_SOUND_IN_MEETING = 'No sound was recorded in this meeting. Check that Wispra may use the microphone.';
+
+// What a meeting shows once its pieces are through: its words, and why when there are none. A
+// meeting where nothing came out of any piece (no sound recorded) says so, instead of looking done
+// and empty (T-0154 review).
+export function finishedMeeting(segments: MeetingSegment[]): { status: 'pending' | 'failed' | 'done'; text: string | null; error: string | null } {
+  const status = meetingStatus(segments);
+  const text = plainText(segments) || null;
+  if (status === 'failed') return { status, text, error: 'Some parts could not be transcribed. Their audio is kept; tap Try again.' };
+  if (status === 'done' && !text && segments.length > 0) return { status, text, error: NO_SOUND_IN_MEETING };
+  return { status, text, error: null };
+}
+
 // A meeting cut off by the app being killed: its unfinished piece waits like the others
 export function recoverSegments(segments: MeetingSegment[]): MeetingSegment[] {
   return segments.map((s) => (s.status === 'recording' ? { ...s, status: 'pending' } : s));

@@ -15,16 +15,15 @@ import {
   type Owner,
 } from './account-switch';
 import { currentSession, subscribe as onSignInChange } from './cloud-auth';
-import { commitWithRollback, drainQueue } from './cloud-gate';
-import { jobKey, nextJob } from './transcribe-queue';
+import { commitWithRollback } from './cloud-gate';
+import { nextJob, runQueue, type Job, type JobOutcome } from './transcribe-queue';
 import { File } from 'expo-file-system';
 
 import { defaultMeetingTitle, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
 import {
-  meetingStatus,
+  finishedMeeting,
   needsSplit,
   piecesToSegments,
-  plainText,
   segmentsWaiting,
   SPLIT_PIECE_MS,
   type MeetingNotes,
@@ -477,13 +476,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   // A meeting whose pieces are done: its text, and whether everything could be transcribed
   const finishMeeting = useCallback(
     (e: Entry) => {
-      const segments = e.segments ?? [];
-      const status = meetingStatus(segments);
-      update(e.id, {
-        status,
-        text: plainText(segments) || null,
-        error: status === 'failed' ? 'Some parts could not be transcribed. Their audio is kept; tap Try again.' : null,
-      });
+      update(e.id, finishedMeeting(e.segments ?? []));
     },
     [update],
   );
@@ -514,28 +507,20 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     [mark, update, updateNotes],
   );
 
-  // The next thing waiting: a piece of a meeting (also while it is still being recorded), a
-  // recording in one piece, or a meeting to finish or write notes for. Oldest first.
-  // One job of the queue (transcribe-queue.ts picks it). A job that fails for a passing reason
-  // (no connection, server busy) keeps its reason on the card and is skipped for the rest of this
-  // run, so the others still go: one stuck recording used to stop the whole queue. Returns false
-  // when nothing is left to do in this run.
-  const runNextJob = useCallback(
-    async (skip: Set<string>): Promise<boolean> => {
-      const job = nextJob(current.current, skip, {
-        readyToFinish,
-        wantsNotes,
-        needsSplit: (piece) => needsSplit(piece) && canSplitAudio,
-      });
-      if (!job) return false;
+  // One job of the queue (transcribe-queue.ts picks the jobs and runs the loop): a piece of a
+  // meeting (also while it is still being recorded), a recording in one piece, or a meeting to
+  // finish or write notes for. A job that fails for a passing reason (no connection, server busy)
+  // keeps its reason on the card and answers 'later', so the others still go.
+  const runJob = useCallback(
+    async (job: Job): Promise<JobOutcome> => {
       const e = job.entry;
       switch (job.kind) {
         case 'finish-meeting':
           finishMeeting(e);
-          return true;
+          return 'done';
         case 'split-piece':
           await splitLongPiece(e.id, job.piece.id);
-          return true;
+          return 'done';
         case 'transcribe-piece': {
           const piece = job.piece;
           mark(e.id, true);
@@ -544,7 +529,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
             if (result.ok) updateSegment(e.id, piece.id, { status: 'done', text: result.text, error: null });
             else if (result.transient) {
               updateSegment(e.id, piece.id, { error: result.error });
-              skip.add(jobKey(job));
+              return 'later';
             }
             // A piece with nothing said (or nothing recorded) in it is simply empty, not a failure
             else if (result.error.startsWith('No speech') || result.error.startsWith('No audio')) {
@@ -553,31 +538,31 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
           } finally {
             mark(e.id, false);
           }
-          return true;
+          return 'done';
         }
         case 'transcribe-entry': {
-          if (await splitLargeRecording(e)) return true;
+          if (await splitLargeRecording(e)) return 'done';
           mark(e.id, true);
           try {
             const result = await transcribe(e);
-            if (!current.current.some((x) => x.id === e.id)) return true;
+            if (!current.current.some((x) => x.id === e.id)) return 'done';
             if (result.ok) update(e.id, { status: 'done', text: result.text, error: null });
             else if (result.transient) {
               update(e.id, { error: result.error });
-              skip.add(jobKey(job));
+              return 'later';
             } else update(e.id, { status: 'failed', error: result.error });
           } finally {
             mark(e.id, false);
           }
-          return true;
+          return 'done';
         }
         case 'notes':
           try {
             await makeNotes(e.id);
           } catch {
-            skip.add(jobKey(job));
+            return 'later';
           }
-          return true;
+          return 'done';
       }
     },
     [finishMeeting, makeNotes, mark, splitLargeRecording, splitLongPiece, update, updateSegment],
@@ -592,14 +577,22 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     try {
       // What failed for a passing reason is skipped until the next run (the next new recording, the
       // app coming back, a sign-in)
-      const skip = new Set<string>();
-      await drainQueue(cloudAllowed, () => runNextJob(skip));
+      await runQueue({
+        allowed: cloudAllowed,
+        pick: (skip) =>
+          nextJob(current.current, skip, {
+            readyToFinish,
+            wantsNotes,
+            needsSplit: (piece) => needsSplit(piece) && canSplitAudio,
+          }),
+        run: runJob,
+      });
     } finally {
       running.current = false;
     }
     // New text is shared with the computer, and the computer's new dictations come in
     await syncHistory();
-  }, [cloudAllowed, runNextJob, syncHistory]);
+  }, [cloudAllowed, runJob, syncHistory]);
 
   const retry = useCallback(
     async (id: string) => {
@@ -636,7 +629,8 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
         const result = await transcribe(entry);
         if (!current.current.some((e) => e.id === id)) return;
         if (result.ok) update(id, { status: 'done', text: result.text, error: null });
-        else update(id, { status: 'failed', error: result.error });
+        // A passing failure waits in the queue, which tries it again by itself, as the card says
+        else update(id, { status: result.transient ? 'pending' : 'failed', error: result.error });
       } finally {
         mark(id, false);
       }

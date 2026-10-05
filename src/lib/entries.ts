@@ -193,6 +193,8 @@ export function previewText(entry: Entry): string {
   // A meeting shows its length and what came out of it, as in the design; a dictation its words
   if (entry.text && entry.kind !== 'meeting') return entry.text.replace(/\s+/g, ' ').trim();
   if (entry.kind === 'meeting') {
+    // Finished with nothing in it: the reason, not an empty meeting that looks fine
+    if (entry.status === 'done' && !entry.text && entry.error) return `${length} · ${entry.error}`;
     const actions = entry.notes?.actions?.length ?? 0;
     if (actions > 0) return `${length} · ${actions} action item${actions === 1 ? '' : 's'}`;
     const marks = entry.bookmarks.length;

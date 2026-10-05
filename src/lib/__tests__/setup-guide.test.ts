@@ -1,6 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { anyAppButton, setupReminders, setupSteps, shouldShowGuide, type SetupState } from '../setup-guide';
+import { existsSync } from 'fs';
+import { join } from 'path';
+
+import { otherAppsRows, setupReminders, setupSteps, shouldShowGuide, type SetupState } from '../setup-guide';
 
 // The owner's first try on iPhone: not signed in, keyboard turned on in Settings, never switched to
 const ownersIphone: SetupState = {
@@ -69,20 +72,35 @@ describe('the reminders on Dictate and Meetings', () => {
   });
 });
 
-describe('the small button at the top of Dictate', () => {
-  it('on iPhone, leads to the keyboard guide, with a dot until the keyboard is on and used', () => {
-    expect(anyAppButton(ownersIphone)).toMatchObject({ label: 'Keyboard', attention: true, target: 'guide' });
-    expect(anyAppButton({ ...ownersIphone, keyboard: { enabled: false, lastSeenAt: null } }).attention).toBe(true);
-    expect(anyAppButton(allSet)).toMatchObject({ label: 'Keyboard', attention: false, target: 'guide' });
+describe('"Dictate in other apps" in Account (T-0154)', () => {
+  const android: SetupState = { ...ownersIphone, platform: 'android', keyboard: null };
+
+  it('on iPhone, the Wispra keyboard opens Settings › Wispra, and the guide stays one tap away', () => {
+    const rows = otherAppsRows({ ...ownersIphone, keyboard: { enabled: false, lastSeenAt: null } });
+    expect(rows.map((r) => [r.label, r.target])).toEqual([
+      ['Wispra keyboard', 'ios-settings'],
+      ['How the keyboard works', '/welcome'],
+    ]);
+    expect(rows[0]).toMatchObject({ value: 'Turn on', attention: true });
+    expect(otherAppsRows(ownersIphone)[0]).toMatchObject({ value: 'On', attention: false });
+    // Once the keyboard has been on screen, it says so: how the owner tells it really loads
+    expect(otherAppsRows(allSet)[0]).toMatchObject({ value: 'In use', attention: false });
   });
 
-  it('on Android, leads to the mic button setup, with a dot while it is off', () => {
-    const android: SetupState = { ...ownersIphone, platform: 'android', keyboard: null };
-    expect(anyAppButton(android)).toMatchObject({ label: 'Mic button', attention: true, target: 'mic-setup' });
-    expect(anyAppButton({ ...android, bubbleOn: true }).attention).toBe(false);
+  it('on Android, the keyboard and the mic button each lead to their setup screen', () => {
+    expect(otherAppsRows(android).map((r) => [r.label, r.target])).toEqual([
+      ['Wispra keyboard', '/keyboard-setup'],
+      ['Mic button', '/dictation-setup'],
+    ]);
+    expect(otherAppsRows(android)[1]).toMatchObject({ value: 'Turn on', attention: true });
+    expect(otherAppsRows({ ...android, bubbleOn: true })[1]).toMatchObject({ value: 'On', attention: false });
   });
 
-  it('says what it does to screen readers', () => {
-    expect(anyAppButton(ownersIphone).accessibilityLabel).toBe('Set up the Wispra keyboard to dictate in any app');
+  it('leads only to screens that exist, so none of them is left without a way in', () => {
+    const screens = [...otherAppsRows(ownersIphone), ...otherAppsRows(android)]
+      .map((r) => r.target)
+      .filter((t) => t !== 'ios-settings');
+    expect(screens.sort()).toEqual(['/dictation-setup', '/keyboard-setup', '/welcome']);
+    for (const screen of screens) expect(existsSync(join(__dirname, '..', '..', 'app', `${screen.slice(1)}.tsx`))).toBe(true);
   });
 });
