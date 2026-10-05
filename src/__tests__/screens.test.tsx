@@ -4,7 +4,7 @@
 // played by small stand-ins.
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { Alert, Linking } from 'react-native';
+import { Alert, Linking, StyleSheet } from 'react-native';
 
 import type { SetupState } from '@/lib/setup-guide';
 
@@ -43,7 +43,7 @@ import DictateScreen from '@/app/(tabs)/dictate';
 // eslint-disable-next-line import/first
 import KeyboardSessionScreen from '@/app/keyboard-session';
 // eslint-disable-next-line import/first
-import { MindMapView, SeekBar } from '@/components/wispra/meeting-views';
+import { MindMapView, SeekBar, TabChips } from '@/components/wispra/meeting-views';
 
 const iphone: SetupState = { platform: 'ios', signedIn: true, keyboard: { enabled: true, lastSeenAt: null }, bubbleOn: false, waiting: 0 };
 const android: SetupState = { platform: 'android', signedIn: true, keyboard: null, bubbleOn: false, waiting: 0 };
@@ -167,5 +167,21 @@ describe('the mind map, drawn like the computer’s (T-0164)', () => {
     expect(circle.props.accessibilityLabel).toBe('Open Phân tích bảo mật (2)');
     await fireEvent.press(circle);
     expect(screen.getByTestId('map-node-Thiếu captcha')).toBeTruthy();
+  });
+});
+
+describe('the tab row of a meeting (T-0164 review, point 6)', () => {
+  it('keeps its height, never shrinks and has its own background, so the content cannot slide over it', async () => {
+    const tabs = [
+      { value: 'summary', label: 'Summary' },
+      { value: 'transcript', label: 'Transcript' },
+      { value: 'mindmap', label: 'Mind map' },
+      { value: 'post', label: 'Post' },
+    ];
+    await render(<TabChips tabs={tabs} value="summary" onChange={() => undefined} />);
+    const row = StyleSheet.flatten(screen.getByTestId('meeting-tabs').props.style) as Record<string, unknown>;
+    expect(row).toMatchObject({ flexGrow: 0, flexShrink: 0, minHeight: 48, backgroundColor: '#0f1117', borderBottomWidth: 1 });
+    // The same component is in the meeting being recorded and in a finished one
+    for (const label of ['Summary', 'Transcript', 'Mind map', 'Post']) expect(screen.getByText(label)).toBeTruthy();
   });
 });

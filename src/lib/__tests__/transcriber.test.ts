@@ -1,7 +1,8 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { UploadType, type UploadOptions, type UploadResult } from 'expo-file-system';
 
-import { resultFromResponse, transcribeFile, type AudioFile } from '../transcriber';
+import { pieceFailed } from '../keyboard-session';
+import { needsResend, resultFromResponse, SPEECH_NOT_MADE_OUT, transcribeFile, type AudioFile } from '../transcriber';
 
 jest.mock('../cloud-auth', () => ({ currentSession: () => null, validToken: async () => null }));
 
@@ -69,5 +70,87 @@ describe("reading Wispra Cloud's answer", () => {
     expect(resultFromResponse(400, JSON.stringify({ error: 'bad file' }))).toEqual({ ok: false, error: 'Wispra Cloud: bad file', transient: false });
     expect(resultFromResponse(200, 'not json')).toMatchObject({ ok: false, transient: true });
     expect(resultFromResponse(200, JSON.stringify({ text: '', segments: [] }))).toEqual({ ok: false, error: 'No speech was heard in this recording.' });
+  });
+});
+
+// T-0164 review, points 2 to 4: what the pieces of a meeting, a dictation and a keyboard session all
+// go through
+describe('real speech lost to the filters is sent again, once (T-0164 review)', () => {
+  const garbled = JSON.stringify({
+    text: '',
+    segments: [{ text: ' B ph tr s vi c tr l m c n g ch th nh t', no_speech_prob: 0.01, avg_logprob: -0.07, start: 0, end: 12 }],
+  });
+  const clean = JSON.stringify({
+    text: '',
+    segments: [{ text: ' Bạn phụ trách sẽ viết câu trả lời mẫu cho các câu hỏi', no_speech_prob: 0.01, avg_logprob: -0.2, start: 0, end: 12 }],
+  });
+
+  function twoAnswers(first: string, second: string) {
+    let n = 0;
+    return audio({ reply: async () => ({ status: 200, body: n++ === 0 ? first : second, headers: {} }) });
+  }
+
+  it('asks again for Vietnamese and keeps the answer with more words', async () => {
+    const { file, calls } = twoAnswers(garbled, clean);
+    const result = await transcribeFile(file, 12_000, token);
+    expect(result).toEqual({ ok: true, text: 'Bạn phụ trách sẽ viết câu trả lời mẫu cho các câu hỏi' });
+    expect(calls).toHaveLength(2);
+    expect(calls[0].options?.parameters).toEqual({ model: 'whisper-large-v3', response_format: 'verbose_json' });
+    expect(calls[1].options?.parameters).toMatchObject({ language: 'vi' });
+  });
+
+  it('keeps the first answer when the second is no better, and never asks a third time', async () => {
+    const { file, calls } = twoAnswers(
+      JSON.stringify({ segments: [{ text: ' Rồi nhé ch c kh th n c nh c', no_speech_prob: 0.01, avg_logprob: -0.2, start: 0, end: 8 }, accentsLostSegment()] }),
+      garbled,
+    );
+    const result = await transcribeFile(file, 12_000, token);
+    expect(result).toEqual({ ok: true, text: 'Rồi nhé' });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('says so when words were heard and none could be made out, instead of "(nothing said)"', async () => {
+    const { file } = twoAnswers(garbled, garbled);
+    const result = await transcribeFile(file, 12_000, token);
+    expect(result).toEqual({ ok: false, error: SPEECH_NOT_MADE_OUT });
+    // A card for it, never "No speech was heard"
+    expect(!result.ok && result.error.startsWith('No speech')).toBe(false);
+  });
+
+  it('does not send again for clean speech, for silence, or when a language was asked for', async () => {
+    const a = audio({ reply: async () => ({ status: 200, body: clean, headers: {} }) });
+    await transcribeFile(a.file, 12_000, token);
+    const b = audio({ reply: async () => ({ status: 200, body: JSON.stringify({ text: '', segments: [] }), headers: {} }) });
+    expect(await transcribeFile(b.file, 12_000, token)).toEqual({ ok: false, error: 'No speech was heard in this recording.' });
+    const c = twoAnswers(garbled, clean);
+    await transcribeFile(c.file, 12_000, token, { language: 'vi' });
+    expect([a.calls.length, b.calls.length, c.calls.length]).toEqual([1, 1, 1]);
+    expect(c.calls[0].options?.parameters).toMatchObject({ language: 'vi' });
+  });
+
+  it('decides from the answer: at least 3 seconds uncovered and half of what Whisper wrote', () => {
+    const base = { text: '', words: 12, wordsLeft: 0, speechSeconds: 12, uncoveredSeconds: 12, gibberish: true };
+    expect(needsResend(base)).toBe(true);
+    expect(needsResend({ ...base, uncoveredSeconds: 2 })).toBe(false);
+    expect(needsResend({ ...base, uncoveredSeconds: 5 })).toBe(false);
+    expect(needsResend({ ...base, gibberish: false })).toBe(false);
+    expect(needsResend(null)).toBe(false);
+  });
+});
+
+function accentsLostSegment() {
+  return { text: ' B ph tr s vi c tr l m c n g', no_speech_prob: 0.01, avg_logprob: -0.07, start: 8, end: 20 };
+}
+
+describe('the callers of the filter (T-0164 review, point 4)', () => {
+  it('Dictate: a short real answer with low confidence is kept, a short garbled one is reported', () => {
+    expect(resultFromResponse(200, JSON.stringify({ segments: [{ text: ' Dạ.', no_speech_prob: 0.1, avg_logprob: -1.5 }] }))).toEqual({ ok: true, text: 'Dạ.' });
+    const lost = resultFromResponse(200, JSON.stringify({ segments: [{ text: ' ch c kh th n c nh c', no_speech_prob: 0.1, avg_logprob: -0.3 }] }));
+    expect(lost).toEqual({ ok: false, error: SPEECH_NOT_MADE_OUT });
+  });
+
+  it('keyboard sessions: a piece with words that could not be made out counts as failed, silence does not', () => {
+    expect(pieceFailed({ ok: false, error: SPEECH_NOT_MADE_OUT })).toBe(true);
+    expect(pieceFailed({ ok: false, error: 'No speech was heard in this recording.' })).toBe(false);
   });
 });

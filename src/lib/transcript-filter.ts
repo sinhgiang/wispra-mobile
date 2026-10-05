@@ -6,6 +6,9 @@ export interface Segment {
   no_speech_prob: number;
   avg_logprob?: number;
   compression_ratio?: number;
+  // Seconds into the audio sent
+  start?: number;
+  end?: number;
 }
 
 export interface VerboseTranscript {
@@ -21,8 +24,58 @@ const NO_SPEECH_THRESHOLD = 0.6;
 // speech that is fast, quiet or long often scores below it (the computer lost whole stretches of
 // real dictations that way). Bare consonants are removed word by word by stripGibberish instead.
 const LOW_CONFIDENCE_LOGPROB = -1.0;
-// Above this the segment is a loop of repeated text
+// Above this a segment's text repeats itself (OpenAI's reference Whisper decodes it again; Groq does
+// not). As on the computer, the repetition is collapsed (collapseLoops) and the segment is KEPT:
+// dropping it whole could lose real speech (T-0164 review, point 1).
 const COMPRESSION_RATIO_THRESHOLD = 2.4;
+// A word or short phrase (up to this many words) said more than twice in a row is a loop
+const LOOP_MAX_PHRASE_WORDS = 4;
+
+// Digits and number words repeat for real (a phone number "0 9 0 0 0 5", "không không không", an
+// amount read twice): never collapsed, since losing one digit loses the number
+const NUMBER_WORDS = new Set([
+  'không', 'một', 'mốt', 'hai', 'ba', 'bốn', 'tư', 'năm', 'lăm', 'sáu', 'bảy', 'bẩy', 'tám', 'chín', 'mười', 'mươi',
+  'linh', 'lẻ', 'trăm', 'nghìn', 'ngàn', 'triệu', 'tỷ', 'tỉ', 'chấm', 'phẩy',
+  'zero', 'oh', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'hundred', 'thousand',
+  'million', 'billion', 'double', 'triple', 'point',
+]);
+
+function isNumberWord(word: string): boolean {
+  return /\p{N}/u.test(word) || NUMBER_WORDS.has(word);
+}
+
+// Whisper stuck in a loop ("vâng vâng vâng vâng…"): a word or phrase of up to 4 words repeated three
+// times or more in a row is kept twice. A list read out with different items, or a phrase said
+// twice, is left as it is. (spetotext/src/main/transcribe.ts, collapseLoops)
+export function collapseLoops(text: string): string {
+  const tokens = text.split(/(\s+)/).filter((t) => t !== '');
+  const words = tokens.filter((t) => !/^\s+$/.test(t));
+  const key = (w: string) => w.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const out: string[] = [];
+  for (let i = 0; i < words.length; ) {
+    let collapsed = false;
+    for (let n = 1; n <= LOOP_MAX_PHRASE_WORDS && !collapsed; n++) {
+      const unit = words.slice(i, i + n).map(key);
+      if (unit.length < n || unit.some((u) => !u)) break;
+      if (unit.some(isNumberWord)) break;
+      let repeats = 1;
+      while (
+        words
+          .slice(i + repeats * n, i + (repeats + 1) * n)
+          .map(key)
+          .join(' ') === unit.join(' ')
+      )
+        repeats++;
+      if (repeats >= 3) {
+        out.push(...words.slice(i, i + 2 * n));
+        i += repeats * n;
+        collapsed = true;
+      }
+    }
+    if (!collapsed) out.push(words[i++]);
+  }
+  return (text.match(/^\s*/)?.[0] ?? '') + out.join(' ');
+}
 
 // Phrases Whisper invents from its training data (mostly YouTube outros) on silence or noise.
 // Matched inside each sentence.
@@ -61,8 +114,8 @@ const HALLUCINATION_PHRASES = [
 // Dropped only when they are the whole sentence; they could start a real one
 const HALLUCINATION_SENTENCES = new Set(['kết thúc video']);
 
+// Silence Whisper filled with invented text. A looping segment is NOT dropped here (collapseLoops).
 export function isReliableSegment(s: Segment): boolean {
-  if (s.compression_ratio !== undefined && s.compression_ratio > COMPRESSION_RATIO_THRESHOLD) return false;
   if (s.no_speech_prob <= NO_SPEECH_THRESHOLD) return true;
   return s.avg_logprob !== undefined && s.avg_logprob >= LOW_CONFIDENCE_LOGPROB;
 }
@@ -155,8 +208,9 @@ function splitSentences(text: string): string[] {
     .filter(Boolean);
 }
 
-export function filterKnownHallucinations(text: string): string {
-  const seen = new Map<string, number>();
+// `seen` is shared by the segments of one answer, so a sentence repeated 3+ times is still caught
+// across segments
+export function filterKnownHallucinations(text: string, seen: Map<string, number> = new Map()): string {
   const kept: string[] = [];
   for (const rawSentence of splitSentences(text)) {
     const sentence = stripGibberish(rawSentence);
@@ -174,10 +228,69 @@ export function filterKnownHallucinations(text: string): string {
   return kept.join(' ').trim();
 }
 
+// What one answer of Whisper gave (T-0164 review, points 1 and 2), read as the computer reads it
+// (spetotext/src/main/transcribe.ts, readVerbose):
+// - looping segments are collapsed, not dropped;
+// - the known-hallucination and bare-consonant filters run SEGMENT BY SEGMENT, never on the joined
+//   text: Whisper often writes Vietnamese without a full stop, so the sentence filter would see 30 s
+//   of real speech plus one outro as ONE sentence and drop all of it (the owner's real run on the
+//   computer: 90 words lost from one part);
+// - a segment "covers" its time only when most of its words survived: real speech with every
+//   accent lost ("B ph tr s vi c tr l m…", confident, avg_logprob -0.07) is removed, and that
+//   speech counts as missing, so the piece can be sent again instead of silently losing the words.
+export interface ReadAnswer {
+  text: string;
+  // Words Whisper wrote in the segments it kept, and words left after the filters
+  words: number;
+  wordsLeft: number;
+  // Seconds of the segments Whisper wrote for, and the part of them whose words did not survive
+  speechSeconds: number;
+  uncoveredSeconds: number;
+  // A bare-consonant run was cut out
+  gibberish: boolean;
+}
+
+function words(text: string): number {
+  return wordTokens(text).length;
+}
+
+// Whether a bare-consonant run is in the text (the filter cuts it sentence by sentence)
+function hasGibberish(text: string): boolean {
+  return splitSentences(text).some((sentence) => stripGibberish(sentence) !== sentence);
+}
+
+export function readAnswer(data: VerboseTranscript): ReadAnswer {
+  const segments = data.segments ?? [];
+  if (segments.length === 0) {
+    const original = (data.text ?? '').trim();
+    const text = filterKnownHallucinations(original);
+    return { text, words: words(original), wordsLeft: words(text), speechSeconds: 0, uncoveredSeconds: 0, gibberish: hasGibberish(original) };
+  }
+  const seen = new Map<string, number>();
+  let gibberish = false;
+  let total = 0;
+  let left = 0;
+  let speech = 0;
+  let uncovered = 0;
+  const pieces = segments.filter(isReliableSegment).map((s) => {
+    const raw = s.compression_ratio !== undefined && s.compression_ratio > COMPRESSION_RATIO_THRESHOLD ? collapseLoops(s.text) : s.text;
+    const original = raw.trim();
+    if (hasGibberish(original)) gibberish = true;
+    const kept = filterKnownHallucinations(original, seen);
+    // Whisper's own spacing between segments is kept
+    const space = kept && /^\s/.test(raw) ? ' ' : '';
+    const had = words(original);
+    const remaining = words(kept);
+    const seconds = typeof s.start === 'number' && typeof s.end === 'number' ? Math.max(0, s.end - s.start) : 0;
+    total += had;
+    left += remaining;
+    speech += seconds;
+    if (!(remaining > 0 && remaining * 2 >= had)) uncovered += seconds;
+    return space + kept;
+  });
+  return { text: pieces.join('').trim(), words: total, wordsLeft: left, speechSeconds: speech, uncoveredSeconds: uncovered, gibberish };
+}
+
 export function cleanTranscript(data: VerboseTranscript): string {
-  const text =
-    data.segments && data.segments.length > 0
-      ? data.segments.filter(isReliableSegment).map((s) => s.text).join('').trim()
-      : (data.text ?? '').trim();
-  return filterKnownHallucinations(text);
+  return readAnswer(data).text;
 }

@@ -235,6 +235,13 @@ export function locate(segments: MeetingSegment[], ms: number): { index: number;
   return { index: 0, offsetMs: 0 };
 }
 
+// Which piece of a meeting a moment is in: the last piece that starts at or before it (the first
+// when the moment is before all of them). The player and the seek bar both go there.
+export function pieceAt(pieces: { startMs: number }[], ms: number): number {
+  for (let i = pieces.length - 1; i >= 0; i--) if (ms >= pieces[i].startMs) return i;
+  return 0;
+}
+
 // The moment of the meeting under a finger on the seek bar (T-0164): 0 at the left edge, the whole
 // length at the right, to the second
 export function seekPosition(x: number, width: number, totalMs: number): number {

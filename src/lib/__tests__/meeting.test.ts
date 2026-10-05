@@ -14,6 +14,7 @@ import {
   piecesToSegments,
   plainText,
   recoverSegments,
+  pieceAt,
   seekPosition,
   seekShare,
   segmentsWaiting,
@@ -174,6 +175,31 @@ describe('a meeting once its pieces are through (T-0154 review)', () => {
     expect(finishedMeeting([seg({ text: 'Chào cả nhà' }), seg({ id: 'b', text: '' })])).toEqual({ status: 'done', text: 'Chào cả nhà', error: null });
     expect(finishedMeeting([seg({ text: 'Chào' }), seg({ id: 'b', status: 'failed' })])).toMatchObject({ status: 'failed', error: expect.stringContaining('Try again') });
     expect(finishedMeeting([seg({ status: 'pending' })])).toEqual({ status: 'pending', text: null, error: null });
+  });
+});
+
+describe('seeking across the pieces of a meeting (T-0164 review)', () => {
+  // 24 pieces of 30 s, as the owner's 11:33 meeting
+  const pieces = Array.from({ length: 24 }, (_, i) => ({ startMs: i * 30_000 }));
+
+  it('finds the piece a moment is in, and how far into it', () => {
+    expect(pieceAt(pieces, 0)).toBe(0);
+    expect(pieceAt(pieces, 29_999)).toBe(0);
+    expect(pieceAt(pieces, 30_000)).toBe(1);
+    expect(pieceAt(pieces, 347_000)).toBe(11);
+    expect(347_000 - pieces[pieceAt(pieces, 347_000)].startMs).toBe(17_000);
+    expect(pieceAt(pieces, 693_000)).toBe(23);
+    expect(pieceAt(pieces, -5)).toBe(0);
+    expect(pieceAt([], 1000)).toBe(0);
+  });
+
+  it('every second of the bar lands in a piece, from the first to the last', () => {
+    const total = 11 * 60_000 + 33_000;
+    const seen = new Set<number>();
+    for (let x = 0; x <= 300; x++) seen.add(pieceAt(pieces, seekPosition(x, 300, total)));
+    expect(Math.min(...seen)).toBe(0);
+    expect(Math.max(...seen)).toBe(23);
+    expect(seen.size).toBe(24);
   });
 });
 

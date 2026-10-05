@@ -525,7 +525,7 @@ final class KeyboardViewController: UIInputViewController {
       if piece.last {
         waitingForWords = false
         statusLabel.text = piecesFailed
-          ? "Không chép được lời (mạng?). Bản ghi ở trong Wispra"
+          ? "Không chép được lời. Bản ghi ở trong Wispra"
           : lastTyped == nil ? "Không nghe rõ, thử lại" : "Đã gõ bằng Wispra"
         piecesFailed = false
       }

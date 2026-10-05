@@ -196,7 +196,7 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
       mic?.sendActions(for: .touchUpInside)
       check(KeyboardSession.shared.deliver(utterance: "t3", index: 0, text: "", last: true, failed: true), "the app hands over a failed piece")
       keyboard.typeQueuedPieces()
-      check(labels(in: keyboard.view).contains("Không chép được lời (mạng?). Bản ghi ở trong Wispra"), "a piece that could not be transcribed says so")
+      check(labels(in: keyboard.view).contains("Không chép được lời. Bản ghi ở trong Wispra"), "a piece that could not be transcribed says so")
 
       keyboard.beginAppearanceTransition(false, animated: false)
       keyboard.endAppearanceTransition()

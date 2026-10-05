@@ -4,7 +4,7 @@ import { currentSession, validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
 import type { Entry } from './entries';
 import { emptyAudio } from './transcribe-queue';
-import { cleanTranscript, type VerboseTranscript } from './transcript-filter';
+import { readAnswer, type ReadAnswer, type VerboseTranscript } from './transcript-filter';
 
 // transient: nothing is wrong with the recording (offline, signed out, server busy), so it can
 // simply wait and be tried again later without the user doing anything
@@ -21,8 +21,21 @@ export function transcriptionAvailable(): boolean {
   return currentSession() !== null;
 }
 
-// Wispra Cloud's answer, as a result for the card. Pure, so it is tested.
-export function resultFromResponse(status: number, body: string): TranscribeResult {
+// What a piece of audio is told to Whisper. The computer sends the language only when the user chose
+// one; here it is left out (Whisper guesses) unless given, and a resend of an answer that lost real
+// speech asks for Vietnamese (see needsResend).
+export interface TranscribeOptions {
+  language?: string;
+}
+
+// Wispra Cloud's answer, as a result for the card, with what the filters did to it. Pure, so it is
+// tested.
+export interface Analysed {
+  result: TranscribeResult;
+  answer: ReadAnswer | null;
+}
+
+export function analyseResponse(status: number, body: string): Analysed {
   let json: unknown = null;
   try {
     json = JSON.parse(body);
@@ -32,21 +45,56 @@ export function resultFromResponse(status: number, body: string): TranscribeResu
   const error = json && typeof json === 'object' ? (json as { error?: unknown }).error : undefined;
   const detail = typeof error === 'string' ? error : '';
   if (status < 200 || status >= 300) {
-    if (status === 401) return { ok: false, error: 'Your Wispra Cloud sign-in has expired. Sign in again in Account.' };
-    if (status === 402) return { ok: false, error: detail || 'This month’s free Wispra Cloud minutes are used up.' };
-    if (status === 413) return { ok: false, error: 'This recording is too large for Wispra Cloud in one piece.' };
+    if (status === 401) return { result: { ok: false, error: 'Your Wispra Cloud sign-in has expired. Sign in again in Account.' }, answer: null };
+    if (status === 402) return { result: { ok: false, error: detail || 'This month’s free Wispra Cloud minutes are used up.' }, answer: null };
+    if (status === 413) return { result: { ok: false, error: 'This recording is too large for Wispra Cloud in one piece.' }, answer: null };
     return {
-      ok: false,
-      error: detail ? `Wispra Cloud: ${detail}` : `Transcription failed (HTTP ${status}).`,
-      transient: status === 429 || status >= 500,
+      result: {
+        ok: false,
+        error: detail ? `Wispra Cloud: ${detail}` : `Transcription failed (HTTP ${status}).`,
+        transient: status === 429 || status >= 500,
+      },
+      answer: null,
     };
   }
   if (!json || typeof json !== 'object') {
-    return { ok: false, error: 'Wispra Cloud sent an answer that could not be read. It is tried again by itself.', transient: true };
+    return { result: { ok: false, error: 'Wispra Cloud sent an answer that could not be read. It is tried again by itself.', transient: true }, answer: null };
   }
-  const text = cleanTranscript(json as VerboseTranscript);
-  if (!text) return { ok: false, error: 'No speech was heard in this recording.' };
-  return { ok: true, text };
+  const answer = readAnswer(json as VerboseTranscript);
+  if (!answer.text) {
+    // Whisper wrote words for it, but none survived the filters (every accent lost, say): not the
+    // same as silence. The words were there; the audio is kept (T-0164 review, point 2).
+    if (answer.words >= 2 && answer.wordsLeft === 0) return { result: { ok: false, error: SPEECH_NOT_MADE_OUT }, answer };
+    return { result: { ok: false, error: 'No speech was heard in this recording.' }, answer };
+  }
+  return { result: { ok: true, text: answer.text }, answer };
+}
+
+export const SPEECH_NOT_MADE_OUT = 'Speech was heard but Whisper could not make out the words. The audio is kept; try again.';
+
+export function resultFromResponse(status: number, body: string): TranscribeResult {
+  return analyseResponse(status, body).result;
+}
+
+// The computer sends a part again when real speech was lost in it. Here, with no sound analysis, the
+// answer's own timestamps say it: at least 3 seconds of segments whose words did not survive, which
+// is at least half of what Whisper wrote for. (spetotext transcribe.ts: uncoveredSeconds against
+// voiced seconds, then the part is cut in half at a pause; the phone cannot cut m4a on iPhone, so it
+// sends the same audio again asking for Vietnamese, the language bare consonants without accents
+// point to.)
+export const RESEND_MIN_UNCOVERED_SECONDS = 3;
+
+export function needsResend(answer: ReadAnswer | null): boolean {
+  if (!answer || !answer.gibberish) return false;
+  if (answer.speechSeconds <= 0) return answer.words >= 4 && answer.wordsLeft * 2 < answer.words;
+  return answer.uncoveredSeconds >= RESEND_MIN_UNCOVERED_SECONDS && answer.uncoveredSeconds * 2 >= answer.speechSeconds;
+}
+
+// The better of two answers: the one that kept more words
+export function betterOf(first: Analysed, second: Analysed): Analysed {
+  const a = first.answer?.wordsLeft ?? 0;
+  const b = second.answer?.wordsLeft ?? 0;
+  return b > a ? second : first;
 }
 
 // What transcribing needs from an audio file (the real one is expo-file-system's File)
@@ -56,14 +104,14 @@ export type AudioFile = {
   upload(url: string, options?: UploadOptions): Promise<UploadResult>;
 };
 
-export async function transcribe(entry: Entry): Promise<TranscribeResult> {
-  return transcribeAudio(entry.audioUri, entry.durationMs);
+export async function transcribe(entry: Entry, options: TranscribeOptions = {}): Promise<TranscribeResult> {
+  return transcribeAudio(entry.audioUri, entry.durationMs, options);
 }
 
 // One audio file: a dictation, a meeting recorded before part 3, or one piece of a meeting
-export async function transcribeAudio(uri: string | null, durationMs: number): Promise<TranscribeResult> {
+export async function transcribeAudio(uri: string | null, durationMs: number, options: TranscribeOptions = {}): Promise<TranscribeResult> {
   if (!uri) return { ok: false, error: 'The audio file is not on this phone.' };
-  return transcribeFile(new File(uri), durationMs, validToken);
+  return transcribeFile(new File(uri), durationMs, validToken, options);
 }
 
 // The file is sent by the phone's own uploader (URLSession on iPhone, OkHttp on Android), straight
@@ -71,7 +119,12 @@ export async function transcribeAudio(uri: string | null, durationMs: number): P
 // replaces fetch with expo/fetch, which does not take such a part and throws before anything is
 // sent ("Unsupported FormDataPart implementation", expo/src/winter/fetch/convertFormData.ts), so no
 // recording ever reached Wispra Cloud and every card said there was no connection (T-0154).
-export async function transcribeFile(audio: AudioFile, durationMs: number, token: () => Promise<string | null>): Promise<TranscribeResult> {
+export async function transcribeFile(
+  audio: AudioFile,
+  durationMs: number,
+  token: () => Promise<string | null>,
+  options: TranscribeOptions = {},
+): Promise<TranscribeResult> {
   if (!audio.exists) return { ok: false, error: 'The audio file is not on this phone.' };
   // Nothing was recorded in it: nothing worth sending
   if (emptyAudio(audio.size)) return { ok: false, error: 'No audio was recorded in this file.' };
@@ -84,6 +137,23 @@ export async function transcribeFile(audio: AudioFile, durationMs: number, token
   const bearer = await token();
   if (!bearer) return { ok: false, error: 'Sign in to Wispra Cloud in Account to transcribe. The audio is kept on this phone.', transient: true };
 
+  const first = await sendOnce(audio, durationMs, bearer, options.language);
+  if ('error' in first) return first.error;
+  // Real speech lost to the filters: once more, asking for Vietnamese; the answer with more words wins
+  if (!options.language && needsResend(first.analysed.answer)) {
+    const again = await sendOnce(audio, durationMs, bearer, 'vi');
+    if (!('error' in again)) return betterOf(first.analysed, again.analysed).result;
+  }
+  return first.analysed.result;
+}
+
+// One upload and the answer read; or why it did not get there
+async function sendOnce(
+  audio: AudioFile,
+  durationMs: number,
+  bearer: string,
+  language: string | undefined,
+): Promise<{ analysed: Analysed } | { error: TranscribeResult }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let response: UploadResult;
@@ -93,7 +163,7 @@ export async function transcribeFile(audio: AudioFile, durationMs: number, token
       uploadType: UploadType.MULTIPART,
       fieldName: 'file',
       mimeType: 'audio/mp4',
-      parameters: { model: MODEL, response_format: 'verbose_json' },
+      parameters: { model: MODEL, response_format: 'verbose_json', ...(language ? { language } : {}) },
       headers: {
         Authorization: `Bearer ${bearer}`,
         // The server counts this toward the monthly minutes
@@ -107,14 +177,16 @@ export async function transcribeFile(audio: AudioFile, durationMs: number, token
     const timedOut = controller.signal.aborted;
     const why = err instanceof Error && err.message ? ` (${err.message})` : '';
     return {
-      ok: false,
-      error: timedOut
-        ? 'Transcription timed out. Check your connection; it is tried again by itself.'
-        : `Could not reach Wispra Cloud${why}. The audio is kept; it is tried again by itself.`,
-      transient: true,
+      error: {
+        ok: false,
+        error: timedOut
+          ? 'Transcription timed out. Check your connection; it is tried again by itself.'
+          : `Could not reach Wispra Cloud${why}. The audio is kept; it is tried again by itself.`,
+        transient: true,
+      },
     };
   } finally {
     clearTimeout(timer);
   }
-  return resultFromResponse(response.status, response.body);
+  return { analysed: analyseResponse(response.status, response.body) };
 }

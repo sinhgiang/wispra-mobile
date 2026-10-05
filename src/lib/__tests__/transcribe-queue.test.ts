@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { createEntry, type Entry } from '../entries';
 import type { MeetingSegment } from '../meeting';
 import { emptyAudio, freeName, jobKey, nextJob, runQueue, TRANSCRIBE_CONCURRENCY, type Job, type JobOutcome, type QueueRules } from '../transcribe-queue';
+import { jest } from '@jest/globals';
 
 const rules: QueueRules = {
   readyToFinish: (e) => !!e.segments && e.status === 'pending' && !e.segments.some((s) => s.status === 'pending' || s.status === 'recording'),
@@ -162,16 +163,58 @@ describe('several transcriptions at once (T-0164: the words came slowly)', () =>
     expect(s.finishedWhileRunning).toEqual([1]);
   });
 
-  it('measured with each piece taking the same time: about three times faster than one by one', async () => {
-    const one = store(40);
-    let t = Date.now();
-    await runQueue({ ...one.opts, concurrency: 1 });
-    const sequentialMs = Date.now() - t;
-    const three = store(40);
-    t = Date.now();
-    await runQueue({ ...three.opts, concurrency: 3 });
-    const parallelMs = Date.now() - t;
-    // 24 pieces × 40 ms: about 960 ms one by one, about 320 ms three at a time
-    expect(parallelMs).toBeLessThan(sequentialMs * 0.55);
+  // On a fake clock, so the figures do not depend on how busy the machine is. The time a piece takes
+  // here is a stand-in, not a measure of Wispra Cloud: the real time per piece on the phone is not
+  // measured yet (T-0164 review, point 5).
+  it('with each piece taking the same time: three at a time take a third of one by one', async () => {
+    jest.useFakeTimers();
+    try {
+      const elapsed = async (concurrency: number) => {
+        const s = store(40);
+        const t0 = Date.now();
+        const done = runQueue({ ...s.opts, concurrency });
+        await jest.runAllTimersAsync();
+        await done;
+        return Date.now() - t0;
+      };
+      const sequential = await elapsed(1);
+      const parallel = await elapsed(3);
+      // 24 pieces × 40 ms, then the meeting is finished (1 ms)
+      expect(sequential).toBe(24 * 40 + 1);
+      expect(parallel).toBe(8 * 40 + 1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('skips the pieces that failed for a passing reason while the others go on, three at a time', async () => {
+    // Wispra Cloud answered "too many requests" for some pieces (the phone treats 429 as "later"):
+    // they are not asked again in this run, the others finish, and the loop ends
+    let entries: Entry[] = [meeting];
+    let running = 0;
+    let most = 0;
+    const asked: string[] = [];
+    const run = async (job: Job): Promise<JobOutcome> => {
+      running++;
+      most = Math.max(most, running);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      running--;
+      if (job.kind === 'transcribe-piece') {
+        asked.push(job.piece.id);
+        const limited = Number(job.piece.id.slice(1)) % 4 === 0;
+        if (limited) return 'later';
+        entries = entries.map((e) => ({ ...e, segments: e.segments!.map((s) => (s.id === job.piece.id ? { ...s, status: 'done' as const, text: 'x' } : s)) }));
+        return 'done';
+      }
+      entries = entries.map((e) => ({ ...e, status: 'done' as const }));
+      return 'done';
+    };
+    const ran = await runQueue({ allowed: () => true, pick: (skip) => nextJob(entries, skip, rules), run, concurrency: 3 });
+    expect(most).toBeLessThanOrEqual(3);
+    // 6 of the 24 pieces were limited: each asked once, never again
+    expect(asked.filter((id) => Number(id.slice(1)) % 4 === 0)).toHaveLength(6);
+    expect(new Set(asked).size).toBe(24);
+    expect(entries[0].segments!.filter((s) => s.status === 'done')).toHaveLength(18);
+    expect(ran.filter((k) => k.endsWith('finish-meeting'))).toHaveLength(0);
   });
 });

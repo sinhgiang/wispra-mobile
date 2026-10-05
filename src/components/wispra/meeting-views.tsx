@@ -6,7 +6,7 @@ import { Button, Card, Chip, Label } from './ui';
 
 import { Gap, W } from '@/constants/wispra';
 import { formatDuration, type Entry } from '@/lib/entries';
-import { formatClock, seekPosition, seekShare, type ActionItem } from '@/lib/meeting';
+import { formatClock, pieceAt, seekPosition, seekShare, type ActionItem } from '@/lib/meeting';
 import { audioExists } from '@/lib/storage';
 
 export function TabChips<T extends string>({ tabs, value, onChange }: { tabs: { value: T; label: string }[]; value: T; onChange: (v: T) => void }) {
@@ -236,8 +236,7 @@ export function SeekBar({ positionMs, totalMs, onSeek }: { positionMs: number; t
 }
 
 function locateIndex(sources: Source[], ms: number): number {
-  for (let i = sources.length - 1; i >= 0; i--) if (ms >= sources[i].startMs) return i;
-  return 0;
+  return pieceAt(sources, ms);
 }
 
 const styles = StyleSheet.create({
