@@ -132,6 +132,12 @@ export function readInbox(): InboxItem[] {
     if (!(note instanceof File) || !note.name.endsWith('.json')) continue;
     const record = parseInboxRecord(note.textSync());
     if (!record) continue;
+    // The Wispra keyboard on Android saves a dictation whose words are already typed without audio
+    // (an empty name): never a path to the inbox folder itself
+    if (!record.audioFileName) {
+      items.push({ entry: entryFromInbox(record, null), note });
+      continue;
+    }
     const waiting = new File(inboxDir, record.audioFileName);
     if (waiting.exists) waiting.moveSync(audioDir);
     const kept = new File(audioDir, record.audioFileName);

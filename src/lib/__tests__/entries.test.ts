@@ -127,6 +127,14 @@ describe('dictations from the mic button in other apps', () => {
     expect(entryFromInbox({ ...record, text: 'Xin chào' }, null)).toMatchObject({ status: 'done', text: 'Xin chào' });
   });
 
+  it('takes a dictation the Android keyboard already typed, with its words and no audio', () => {
+    const typed = parseInboxRecord(
+      JSON.stringify({ version: 1, id: 'mobile-k1', kind: 'dictation', createdAt: '2026-10-05T11:00:00.000Z', durationMs: 0, audioFileName: '', sourceApp: 'Zalo', text: 'Họp lúc 2 giờ' }),
+    )!;
+    expect(typed.audioFileName).toBe('');
+    expect(entryFromInbox(typed, null)).toMatchObject({ status: 'done', text: 'Họp lúc 2 giờ', audioUri: null, title: 'Zalo' });
+  });
+
   it('ignores broken files', () => {
     expect(parseInboxRecord('{')).toBeNull();
     expect(parseInboxRecord('{"id":"x"}')).toBeNull();

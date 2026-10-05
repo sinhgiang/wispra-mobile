@@ -37,25 +37,26 @@ export default function KeyboardSetupScreen() {
 
       <ScrollView contentContainerStyle={styles.body}>
         <Body style={styles.lead}>
-          For apps where the mic button does not show up. Switch to the Wispra keyboard, tap the mic, speak, then tap
-          Done: your words are typed where the cursor is. Tap ABC to go back to your usual keyboard.
+          A full keyboard with Vietnamese (Telex), the same as on iPhone. Tap the small purple mic at the top left: it turns
+          red and listens, and your words are typed where the cursor is as you speak. Tap the red mic when you are done. The
+          🌐 key goes back to your other keyboard.
         </Body>
 
         <Card>
           <Text style={styles.cardTitle}>About Android&apos;s warning</Text>
           <Body style={styles.note}>
-            When you turn on any keyboard, Android warns that it could collect what you type. The Wispra keyboard has no
-            letter keys: it only types what you dictate, and it keeps no record of what you type. Each dictation is saved
-            in Wispra&apos;s History on this phone, and is sent to Wispra Cloud only to turn it into text. Password fields
-            are skipped.
+            When you turn on any keyboard, Android warns that it could collect what you type. The Wispra keyboard keeps no
+            record of what you type and sends none of it anywhere. Only what you say after tapping the mic is sent to Wispra
+            Cloud, to turn it into text; each dictation is saved in Wispra&apos;s History on this phone. Password fields are
+            skipped.
           </Body>
         </Card>
 
         <Card>
           <Text style={styles.cardTitle}>On the keyboard</Text>
           <Body style={styles.note}>
-            Undo takes back the words just typed. Clean up, Formal and English rewrite them with Wispra Cloud&apos;s AI.
-            Signed in to Wispra Cloud (Account tab) is needed to type and rewrite.
+            VN/EN turns Vietnamese Telex on or off (vieetj → việt). Hoàn tác takes back the words Wispra just typed. Being
+            signed in to Wispra Cloud (Account tab) is needed to dictate.
           </Body>
         </Card>
 
@@ -71,7 +72,7 @@ export default function KeyboardSetupScreen() {
         {enabled ? (
           <>
             <Button kind="primary" label="Choose the keyboard" onPress={showKeyboardPicker} />
-            <Label style={styles.center}>Pick Wispra keyboard in the list. You can switch back any time with ABC.</Label>
+            <Label style={styles.center}>Pick Wispra keyboard in the list. You can switch back any time with 🌐.</Label>
           </>
         ) : (
           <>
