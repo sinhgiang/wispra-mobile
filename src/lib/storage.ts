@@ -85,12 +85,12 @@ export function saveDeletionBook(book: DeletionBook): void {
 }
 
 // The account the data on this phone belongs to (see account-switch.ts)
-export function loadDataOwner(): DataOwner | null {
+export function loadDataOwner(): DataOwner | 'unclaimed' | null {
   const file = new File(root, 'account.json');
   return parseOwner(file.exists ? file.textSync() : null);
 }
 
-export function saveDataOwner(owner: DataOwner): void {
+export function saveDataOwner(owner: DataOwner | 'unclaimed'): void {
   ensureDirs();
   const tmp = new File(root, 'account.json.tmp');
   if (tmp.exists) tmp.delete();

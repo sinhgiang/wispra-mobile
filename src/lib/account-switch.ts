@@ -15,6 +15,15 @@ export interface DataOwner {
   email: string;
 }
 
+/**
+ * Whose the data on this phone is:
+ * - an account (account.json names it)
+ * - 'unknown': there is data but no account.json (it was made by a version of Wispra that did not
+ *   keep one), so any sign-in asks, like another account would (Chief's decision, T-0142)
+ * - null: nobody yet (a fresh phone, or account.json says unclaimed): the first sign-in takes it
+ */
+export type Owner = DataOwner | 'unknown' | null;
+
 export interface SignedIn {
   userId: string;
   email: string;
@@ -23,19 +32,20 @@ export interface SignedIn {
 export type AccountChoice = 'merge' | 'new-only';
 
 // Whether the user has to choose before anything is synced
-export function needsChoice(owner: DataOwner | null, session: SignedIn | null): boolean {
-  return !!owner && !!session && owner.userId !== session.userId;
+export function needsChoice(owner: Owner, session: SignedIn | null): boolean {
+  if (!session || !owner) return false;
+  return owner === 'unknown' || owner.userId !== session.userId;
 }
 
 // Syncing with Wispra Cloud is allowed only for the account the phone's data belongs to
-export function syncAllowed(owner: DataOwner | null, session: SignedIn | null): boolean {
+export function syncAllowed(owner: Owner, session: SignedIn | null): boolean {
   return !!session && !needsChoice(owner, session);
 }
 
 // After a sign-in that needs no choice: the first account becomes the owner; the same account
 // keeps it (with its current email). Returns the owner unchanged while a choice is waiting.
-export function ownerAfterSignIn(owner: DataOwner | null, session: SignedIn | null): DataOwner | null {
-  if (!session) return owner;
+export function ownerAfterSignIn(owner: Owner, session: SignedIn | null): Owner {
+  if (!session || owner === 'unknown') return owner;
   if (!owner || owner.userId === session.userId) return { userId: session.userId, email: session.email };
   return owner;
 }
@@ -91,9 +101,14 @@ export interface ChoiceText {
   intro: string;
   merge: { label: string; detail: string };
   newOnly: { label: string; detail: string };
+  // A way out for a sign-in with the wrong account; not a third choice about the data
+  signOut: { label: string; detail: string };
 }
 
-export function choiceText(previous: DataOwner, next: SignedIn, data: PhoneData): ChoiceText {
+export function choiceText(previous: DataOwner | 'unknown', next: SignedIn, data: PhoneData): ChoiceText {
+  const prev = previous === 'unknown' ? 'an earlier account' : previous.email || 'the previous account';
+  const from =
+    previous === 'unknown' ? 'from an earlier account (this phone did not keep which one)' : `from ${previous.email || 'the previous account'}`;
   const what = `${plural(data.dictations, 'dictation')} and ${plural(data.meetings, 'meeting')}`;
   const lost =
     data.onlyHere > 0
@@ -101,31 +116,49 @@ export function choiceText(previous: DataOwner, next: SignedIn, data: PhoneData)
       : '';
   return {
     title: 'You signed in with another account',
-    intro: `This phone has ${what} from ${previous.email || 'the previous account'}. You are now signed in as ${next.email || 'a new account'}. Choose what happens to them. Nothing is synced until you choose.`,
+    intro: `This phone has ${what} ${from}. You are now signed in as ${next.email || 'a new account'}. Choose what happens to them. Nothing is synced until you choose.`,
     merge: {
       label: `Merge into ${next.email || 'the new account'}`,
       detail: `Keep the ${what} on this phone and sync them with ${next.email || 'the new account'}: the dictations go up to its Wispra Cloud and appear on its other devices. Meetings stay on this phone only: Wispra Cloud does not keep meetings from the phone.`,
     },
     newOnly: {
       label: `Use only ${next.email || 'the new account'}`,
-      detail: `Remove the ${what} of ${previous.email || 'the previous account'} from this phone and take the dictation history of ${next.email || 'the new account'} from Wispra Cloud. Nothing is deleted in the Wispra Cloud of ${previous.email || 'the previous account'}; sign in to it again to get its shared dictations back.${lost} Meetings of ${next.email || 'the new account'} made on other devices cannot be brought to this phone.`,
+      detail: `Remove the ${what} of ${prev} from this phone and take the dictation history of ${next.email || 'the new account'} from Wispra Cloud. Nothing is deleted in the Wispra Cloud of ${prev}; sign in to it again to get its shared dictations back.${lost} Meetings of ${next.email || 'the new account'} made on other devices cannot be brought to this phone.`,
+    },
+    signOut: {
+      label: 'Sign out',
+      detail: 'Signed in with the wrong account? Sign out: nothing is synced and nothing changes on this phone.',
     },
   };
 }
 
-// account.json
-export function parseOwner(text: string | null): DataOwner | null {
+// account.json: an account, or 'unclaimed' (nobody yet); null when there is no readable file
+export function parseOwner(text: string | null): DataOwner | 'unclaimed' | null {
   if (!text) return null;
   try {
-    const raw = JSON.parse(text) as Partial<DataOwner>;
+    const raw = JSON.parse(text) as Partial<DataOwner> & { unclaimed?: unknown };
+    if (raw.unclaimed === true) return 'unclaimed';
     return typeof raw.userId === 'string' && raw.userId ? { userId: raw.userId, email: typeof raw.email === 'string' ? raw.email : '' } : null;
   } catch {
     return null;
   }
 }
 
-export function serializeOwner(owner: DataOwner): string {
-  return JSON.stringify({ userId: owner.userId, email: owner.email });
+export function serializeOwner(owner: DataOwner | 'unclaimed'): string {
+  return owner === 'unclaimed' ? JSON.stringify({ unclaimed: true }) : JSON.stringify({ userId: owner.userId, email: owner.email });
+}
+
+/**
+ * The owner when Wispra starts, from account.json and the entries on the phone. No file and no
+ * data: a fresh phone, marked unclaimed so what is recorded before the first sign-in belongs to that
+ * first account. No file but data: made by an older version, so the owner is unknown and a sign-in
+ * asks (nothing is pushed to the account that signs in until the user chose).
+ */
+export function ownerAtStart(file: DataOwner | 'unclaimed' | null, entries: Entry[]): { owner: Owner; markUnclaimed: boolean } {
+  if (file === 'unclaimed') return { owner: null, markUnclaimed: false };
+  if (file) return { owner: file, markUnclaimed: false };
+  if (settled(entries).length > 0) return { owner: 'unknown', markUnclaimed: false };
+  return { owner: null, markUnclaimed: true };
 }
 
 // What the question shows, and exactly which entries it counted (the choice is bound to them)
@@ -135,7 +168,7 @@ export interface AccountChoiceView {
   shownIds: string[];
 }
 
-export function choiceView(owner: DataOwner | null, session: SignedIn | null, entries: Entry[]): AccountChoiceView | null {
+export function choiceView(owner: Owner, session: SignedIn | null, entries: Entry[]): AccountChoiceView | null {
   if (!owner || !session || !needsChoice(owner, session)) return null;
   const data = phoneData(entries);
   return { data, text: choiceText(owner, session, data), shownIds: settled(entries).map((e) => e.id) };
@@ -153,7 +186,7 @@ export type ChoiceResult = 'done' | 'changed' | 'save-failed' | 'not-needed';
 
 export interface ChoiceDeps {
   session(): SignedIn | null;
-  owner(): DataOwner | null;
+  owner(): Owner;
   // The latest entries
   entries(): Entry[];
   // Saves the list; false when it did not reach the disk

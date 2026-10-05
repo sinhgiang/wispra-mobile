@@ -3,7 +3,7 @@
 // DeleteSyncStore (delete-sync.ts) and ChoiceDeps (account-switch.ts), wired the way entries-store
 // wires them.
 
-import type { ChoiceDeps, DataOwner, SignedIn } from '../account-switch';
+import type { ChoiceDeps, DataOwner, Owner, SignedIn } from '../account-switch';
 import type { DeleteSyncStore } from '../delete-sync';
 import type { Entry } from '../entries';
 import { EMPTY_BOOK, parseDeletionBook, serializeDeletionBook, stateOf, withState, type DeletionBook, type PendingDeletes } from '../history-delete';
@@ -13,7 +13,7 @@ export class FakeStore implements DeleteSyncStore, ChoiceDeps {
   list: Entry[] = [];
   file: string | null = null;
   book: DeletionBook = EMPTY_BOOK;
-  dataOwner: DataOwner | null = null;
+  dataOwner: Owner = null;
   // The next saves of the list fail (a full disk)
   failSaves = false;
   deletedAudio: string[] = [];
@@ -46,7 +46,7 @@ export class FakeStore implements DeleteSyncStore, ChoiceDeps {
   session(): SignedIn | null {
     return fakeAuth.user ? { userId: fakeAuth.user, email: `${fakeAuth.user}@example.com` } : null;
   }
-  owner(): DataOwner | null {
+  owner(): Owner {
     return this.dataOwner;
   }
   saveEntries(list: Entry[]): boolean {
