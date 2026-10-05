@@ -10,8 +10,8 @@ import { signInWithGoogle } from '@/lib/sign-in';
 import { useSetupState } from '@/lib/use-setup';
 
 // What is still missing to use Wispra, right where it matters (T-0145)
-export function SetupReminders({ screen }: { screen: 'dictate' | 'meetings' }) {
-  const reminders = setupReminders(useSetupState(), screen);
+export function SetupReminders() {
+  const reminders = setupReminders(useSetupState());
   const [signingIn, setSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

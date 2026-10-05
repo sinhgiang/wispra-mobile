@@ -56,6 +56,10 @@ import DictateScreen from '@/app/(tabs)/dictate';
 // eslint-disable-next-line import/first
 import KeyboardSessionScreen from '@/app/keyboard-session';
 // eslint-disable-next-line import/first
+import WelcomeScreen from '@/app/welcome';
+// eslint-disable-next-line import/first
+import { SPEAK_FLOW } from '@/lib/keyboard-session';
+// eslint-disable-next-line import/first
 import { MindMapView, SeekBar, TabChips } from '@/components/wispra/meeting-views';
 
 const iphone: SetupState = { platform: 'ios', signedIn: true, keyboard: { enabled: true, lastSeenAt: null }, bubbleOn: false, waiting: 0 };
@@ -229,5 +233,29 @@ describe('Account › Transcription language (T-0145, W-0311)', () => {
     mockSetup = android;
     await render(<AccountScreen />);
     expect(screen.getByText('Language')).toBeTruthy();
+  });
+});
+
+describe('the first-run guide describes the mic flow the keyboard really has (T-0145 review, point 1)', () => {
+  it('step 3 says: purple mic, Wispra opens and listens by itself, go back, purple again, red to finish; no "tap Done"', async () => {
+    await render(<WelcomeScreen />);
+    // Step 3, in the words both screens share
+    expect(screen.getByText(SPEAK_FLOW, { exact: false })).toBeTruthy();
+    expect(screen.getByText(/starts listening by itself/)).toBeTruthy();
+    expect(screen.getByText(/swipe right along the bottom edge/)).toBeTruthy();
+    // The old flow, where words were spoken in Wispra and Done was tapped there, is gone
+    expect(screen.queryByText(/tap Done/i)).toBeNull();
+    expect(screen.queryByText(/say your text/i)).toBeNull();
+  });
+
+  it('is the same flow the listening session screen tells, word for word', async () => {
+    const view = await render(<KeyboardSessionScreen />);
+    expect(screen.getByText(`Back in your app, ${SPEAK_FLOW}`)).toBeTruthy();
+    expect(screen.getByText(/red mic/)).toBeTruthy();
+    expect(SPEAK_FLOW).toContain('purple mic');
+    expect(SPEAK_FLOW).toContain('red mic');
+    await view.unmount();
+    await render(<WelcomeScreen />);
+    expect(screen.getByText(/Then tap the purple mic/)).toBeTruthy();
   });
 });

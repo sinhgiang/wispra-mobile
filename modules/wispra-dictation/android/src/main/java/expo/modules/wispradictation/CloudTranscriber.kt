@@ -28,7 +28,7 @@ class CloudTranscriber(private val context: Context) : Transcriber {
     val first = send(audio, durationMs, apiBase, token, language = language, countMinutes = true) ?: return null
     // With a language already sent there is nothing more to ask; with none, a piece that lost real
     // speech is sent again asking for Vietnamese
-    val chosen = if (language != null) answerOf(first) else TranscriptFilter.resolve(answerOf(first)) {
+    val chosen = TranscriptFilter.resolveFor(language, answerOf(first)) {
       send(audio, durationMs, apiBase, token, language = "vi", countMinutes = false)?.let { answerOf(it) }
     }
     return chosen.text.ifEmpty { null }

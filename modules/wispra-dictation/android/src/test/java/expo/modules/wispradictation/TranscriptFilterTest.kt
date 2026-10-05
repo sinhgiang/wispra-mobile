@@ -214,4 +214,21 @@ class TranscriptFilterTest {
     assertEquals(0, asked)
     assertNotEquals(cleanSpeech.text, outro.text)
   }
+
+  // ── The language already told to Whisper (T-0145 review) ──
+
+  @Test
+  fun withALanguageAlreadyToldThereIsNothingMoreToAsk() {
+    val garbled = TranscriptFilter.readAnswer(null, listOf(accentsLost))
+    assertTrue(TranscriptFilter.needsResend(garbled))
+    var asked = 0
+    // "vi" or "en" was sent: the first answer stands, nothing is sent again
+    assertEquals(garbled, TranscriptFilter.resolveFor("vi", garbled) { asked++; null })
+    assertEquals(garbled, TranscriptFilter.resolveFor("en", garbled) { asked++; null })
+    assertEquals(0, asked)
+    // None was sent (auto): the resend asking for Vietnamese is still there
+    val clean = TranscriptFilter.readAnswer(null, listOf(Segment(" Bạn phụ trách sẽ viết câu trả lời mẫu cho các câu hỏi", 0.01, -0.2, start = 0.0, end = 12.0)))
+    assertEquals(clean, TranscriptFilter.resolveFor(null, garbled) { asked++; clean })
+    assertEquals(1, asked)
+  }
 }

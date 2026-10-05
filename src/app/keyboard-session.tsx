@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Body, Button, MicGlyph, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { useEntries } from '@/lib/entries-store';
-import { minutesLeft, sessionLabel } from '@/lib/keyboard-session';
+import { minutesLeft, sessionLabel, SPEAK_FLOW } from '@/lib/keyboard-session';
 import { loadSessionMinutes } from '@/lib/storage';
 import { endSession, onSessionState, sessionState, startSession, type SessionState } from '@/modules/wispra-keyboard-bridge';
 
@@ -78,8 +78,7 @@ export default function KeyboardSessionScreen() {
         </View>
         <Text style={styles.title}>{active ? 'Wispra is listening for the keyboard' : 'Starting the listening session…'}</Text>
         <Body style={styles.text}>
-          Back in your app, tap the purple mic on the Wispra keyboard and speak. Tap the red mic when you are done: the words appear
-          where the cursor is.
+          {`Back in your app, ${SPEAK_FLOW}`}
         </Body>
         {active ? (
           <View style={styles.dot}>

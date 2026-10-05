@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Body, Button, Card, MicGlyph, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
+import { SPEAK_FLOW } from '@/lib/keyboard-session';
 import { setupSteps, type StepId } from '@/lib/setup-guide';
 import { signInWithGoogle } from '@/lib/sign-in';
 import { useSetupState } from '@/lib/use-setup';
@@ -62,8 +63,11 @@ export default function WelcomeScreen() {
               <GlobePicture />
               <Body style={styles.text}>
                 Keep Wispra as your keyboard: it has every letter and types Vietnamese (Telex), so there is no need to switch back.
-                To speak, tap the small purple mic at the top left of the keyboard. Wispra opens to listen (iPhone keyboards cannot
-                use the microphone): say your text, tap Done, then tap ◀ at the top left to go back. The keyboard types your words.
+              </Body>
+              <Body style={styles.text}>
+                To speak, tap the small purple mic at the top left of the keyboard. The first time, Wispra opens and starts listening
+                by itself (iPhone keyboards cannot use the microphone): tap ◀ at the top left, or swipe right along the bottom edge
+                of the screen, to go back to your app. Then {SPEAK_FLOW}
               </Body>
             </Step>
           </>

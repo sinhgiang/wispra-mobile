@@ -38,6 +38,12 @@ export function pieceFailed(result: TranscribeResult): boolean {
   return !result.ok && !isSilenceError(result.error);
 }
 
+// How speaking works, in the words the guide and the session screen both use (T-0145 review): in
+// the app being typed in, the purple mic starts listening and turns red; the red mic ends it and the
+// words appear at the cursor. One text, so the two screens never describe different flows.
+export const SPEAK_FLOW =
+  'tap the purple mic on the Wispra keyboard and speak. Tap the red mic when you are done: the words appear where the cursor is.';
+
 // How long a session lasts, in minutes (T-0163): chosen once in Account, never each time the mic
 // opens Wispra. Each use of the keyboard's mic starts the count again, so a session in use goes on.
 export const SESSION_CHOICES = [15, 60, 240] as const;

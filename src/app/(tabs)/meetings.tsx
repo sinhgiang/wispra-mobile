@@ -18,7 +18,7 @@ export default function MeetingsScreen() {
     <SafeAreaView edges={['top']} style={ui.screen}>
       <View style={styles.header}>
         <Title>Meetings</Title>
-        <SetupReminders screen="meetings" />
+        <SetupReminders />
         <Button kind="primary" label="Record a meeting" onPress={() => router.push('/meeting/record')} />
       </View>
       <FlatList

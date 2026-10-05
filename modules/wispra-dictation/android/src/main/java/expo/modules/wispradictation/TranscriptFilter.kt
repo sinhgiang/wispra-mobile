@@ -272,6 +272,14 @@ object TranscriptFilter {
     return answer.uncoveredSeconds >= RESEND_MIN_UNCOVERED_SECONDS && answer.uncoveredSeconds * 2 >= answer.speechSeconds
   }
 
+  /**
+   * What the keyboard and the mic button do with the first answer, given the language they sent
+   * (T-0145 review): with a language already told to Whisper there is nothing more to ask, so the
+   * first answer stands; with none ("auto"), see resolve.
+   */
+  fun resolveFor(language: String?, first: Answer, resend: () -> Answer?): Answer =
+    if (language != null) first else resolve(first, resend)
+
   /** The answer to use: the first, or the resend's when the first lost speech and the resend kept more words */
   fun resolve(first: Answer, resend: () -> Answer?): Answer {
     if (!needsResend(first)) return first
