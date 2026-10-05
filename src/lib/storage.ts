@@ -2,6 +2,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 
 import { entryFromInbox, parseEntries, parseInboxRecord, serializeEntries, type Entry } from './entries';
 import { parseOwner, serializeOwner, type DataOwner } from './account-switch';
+import { freeName } from './transcribe-queue';
 import { parseDeletionBook, serializeDeletionBook, type DeletionBook } from './history-delete';
 
 // Everything lives in the app's document directory, which the system never clears on its own
@@ -43,7 +44,9 @@ export function keepAudio(uri: string): string {
   ensureDirs();
   const file = new File(uri);
   if (!file.exists || file.uri.startsWith(audioDir.uri)) return file.uri;
-  file.moveSync(audioDir);
+  // Never over another recording: a name already taken gets a suffix
+  const name = freeName(file.name, (candidate) => new File(audioDir, candidate).exists, () => Math.random().toString(36).slice(2, 8));
+  file.moveSync(new File(audioDir, name));
   return file.uri;
 }
 

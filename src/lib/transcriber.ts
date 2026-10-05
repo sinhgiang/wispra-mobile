@@ -3,6 +3,7 @@ import { File } from 'expo-file-system';
 import { currentSession, validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
 import type { Entry } from './entries';
+import { emptyAudio } from './transcribe-queue';
 import { cleanTranscript, type VerboseTranscript } from './transcript-filter';
 
 // transient: nothing is wrong with the recording (offline, signed out, server busy), so it can
@@ -38,6 +39,8 @@ export async function transcribeAudio(uri: string | null, durationMs: number): P
   if (!uri) return { ok: false, error: 'The audio file is not on this phone.' };
   const audio = new File(uri);
   if (!audio.exists) return { ok: false, error: 'The audio file is not on this phone.' };
+  // Nothing was recorded in it: sending it would fail on the phone and look like a lost connection
+  if (emptyAudio(audio.size)) return { ok: false, error: 'No audio was recorded in this file.' };
   if ((audio.size ?? 0) > CLOUD_UPLOAD_MAX_BYTES) {
     return {
       ok: false,
@@ -69,9 +72,12 @@ export async function transcribeAudio(uri: string | null, durationMs: number): P
     });
   } catch (err) {
     const timedOut = err instanceof Error && err.name === 'AbortError';
+    const why = err instanceof Error && err.message ? ` (${err.message})` : '';
     return {
       ok: false,
-      error: timedOut ? 'Transcription timed out. Check your connection and try again.' : 'No connection to Wispra Cloud. The audio is kept; try again later.',
+      error: timedOut
+        ? 'Transcription timed out. Check your connection and try again.'
+        : `Could not reach Wispra Cloud${why}. The audio is kept; it is tried again by itself.`,
       transient: true,
     };
   } finally {

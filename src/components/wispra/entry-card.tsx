@@ -68,7 +68,7 @@ export function PendingCard({ entry, onPress }: { entry: Entry; onPress?: () => 
         {entry.kind === 'meeting' || entry.title !== 'Dictation' ? entry.title : 'Recording'} not transcribed yet ·{' '}
         {formatDuration(entry.durationMs)}
       </Text>
-      <Text style={styles.pendingNote}>{busy ? 'Transcribing with Wispra Cloud…' : (entry.error ?? 'The audio is kept on this phone.')}</Text>
+      <Text style={styles.pendingNote}>{busy ? 'Transcribing with Wispra Cloud…' : (entry.error ?? entry.segments?.find((s) => s.error)?.error ?? 'The audio is kept on this phone.')}</Text>
       <View style={styles.actions}>
         <Button small kind="primary" label={busy ? 'Trying…' : 'Try again'} disabled={busy} onPress={tryAgain} />
         <Button small label="Delete" onPress={askDelete} />

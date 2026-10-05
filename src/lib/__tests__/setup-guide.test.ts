@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { setupReminders, setupSteps, shouldShowGuide, type SetupState } from '../setup-guide';
+import { anyAppButton, setupReminders, setupSteps, shouldShowGuide, type SetupState } from '../setup-guide';
 
 // The owner's first try on iPhone: not signed in, keyboard turned on in Settings, never switched to
 const ownersIphone: SetupState = {
@@ -48,16 +48,9 @@ describe('the reminders on Dictate and Meetings', () => {
     expect(first.action).toEqual({ label: 'Sign in with Google', target: 'sign-in' });
   });
 
-  it('on Dictate, tells how to switch to a keyboard that is on but never used', () => {
-    const reminders = setupReminders(ownersIphone, 'dictate');
-    expect(reminders.map((r) => r.id)).toEqual(['sign-in', 'switch-keyboard']);
-    expect(reminders[1].body).toContain('touch and hold the globe key');
-  });
-
-  it('on Dictate, asks to add the keyboard when iOS says it is off', () => {
-    const r = setupReminders({ ...ownersIphone, signedIn: true, keyboard: { enabled: false, lastSeenAt: null } }, 'dictate');
-    expect(r.map((x) => x.id)).toEqual(['add-keyboard']);
-    expect(r[0].action.target).toBe('guide');
+  it('on Dictate, only the sign-in: no big keyboard card any more (T-0154)', () => {
+    expect(setupReminders(ownersIphone, 'dictate').map((r) => r.id)).toEqual(['sign-in']);
+    expect(setupReminders({ ...ownersIphone, signedIn: true, keyboard: { enabled: false, lastSeenAt: null } }, 'dictate')).toEqual([]);
   });
 
   it('on Meetings, only the sign-in matters', () => {
@@ -73,5 +66,23 @@ describe('the reminders on Dictate and Meetings', () => {
   it('uses the singular for one waiting recording, and a general line when none waits', () => {
     expect(setupReminders({ ...ownersIphone, waiting: 1 }, 'meetings')[0].body).toContain('1 recording is waiting');
     expect(setupReminders({ ...ownersIphone, waiting: 0 }, 'meetings')[0].body).toContain('Sign in once with Google');
+  });
+});
+
+describe('the small button at the top of Dictate', () => {
+  it('on iPhone, leads to the keyboard guide, with a dot until the keyboard is on and used', () => {
+    expect(anyAppButton(ownersIphone)).toMatchObject({ label: 'Keyboard', attention: true, target: 'guide' });
+    expect(anyAppButton({ ...ownersIphone, keyboard: { enabled: false, lastSeenAt: null } }).attention).toBe(true);
+    expect(anyAppButton(allSet)).toMatchObject({ label: 'Keyboard', attention: false, target: 'guide' });
+  });
+
+  it('on Android, leads to the mic button setup, with a dot while it is off', () => {
+    const android: SetupState = { ...ownersIphone, platform: 'android', keyboard: null };
+    expect(anyAppButton(android)).toMatchObject({ label: 'Mic button', attention: true, target: 'mic-setup' });
+    expect(anyAppButton({ ...android, bubbleOn: true }).attention).toBe(false);
+  });
+
+  it('says what it does to screen readers', () => {
+    expect(anyAppButton(ownersIphone).accessibilityLabel).toBe('Set up the Wispra keyboard to dictate in any app');
   });
 });

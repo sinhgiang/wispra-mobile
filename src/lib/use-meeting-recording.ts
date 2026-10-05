@@ -55,7 +55,8 @@ export function useMeetingRecording() {
 
   const startPiece = useCallback(
     async (recorder: AudioRecorder, startMs: number) => {
-      await recorder.prepareToRecordAsync();
+      // A new file for each piece (see use-recording: iOS reuses the file without the options)
+      await recorder.prepareToRecordAsync(PIECE_RECORDING);
       recorder.record();
       const id = newId();
       addSegment(entryRef.current!, { id, uri: recorder.uri, startMs, durationMs: 0, status: 'recording', text: null, error: null });
@@ -96,7 +97,7 @@ export function useMeetingRecording() {
     switching.current = true;
     try {
       const next = other(current);
-      await next.prepareToRecordAsync();
+      await next.prepareToRecordAsync(PIECE_RECORDING);
       const lengthMs = current.getStatus().durationMillis;
       next.record();
       const startMs = doneMs.current + lengthMs;

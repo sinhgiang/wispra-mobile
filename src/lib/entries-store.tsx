@@ -16,6 +16,7 @@ import {
 } from './account-switch';
 import { currentSession, subscribe as onSignInChange } from './cloud-auth';
 import { commitWithRollback, drainQueue } from './cloud-gate';
+import { jobKey, nextJob } from './transcribe-queue';
 import { File } from 'expo-file-system';
 
 import { defaultMeetingTitle, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
@@ -515,59 +516,72 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
 
   // The next thing waiting: a piece of a meeting (also while it is still being recorded), a
   // recording in one piece, or a meeting to finish or write notes for. Oldest first.
-  const runNextJob = useCallback(async (): Promise<boolean> => {
-    const list = [...current.current].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    for (const e of list) {
-      if (readyToFinish(e)) {
-        finishMeeting(e);
-        return true;
-      }
-      const piece = segmentsWaiting(e.segments)[0];
-      if (piece && (e.status === 'pending' || e.status === 'recording')) {
-        if (needsSplit(piece) && canSplitAudio) {
-          await splitLongPiece(e.id, piece.id);
+  // One job of the queue (transcribe-queue.ts picks it). A job that fails for a passing reason
+  // (no connection, server busy) keeps its reason on the card and is skipped for the rest of this
+  // run, so the others still go: one stuck recording used to stop the whole queue. Returns false
+  // when nothing is left to do in this run.
+  const runNextJob = useCallback(
+    async (skip: Set<string>): Promise<boolean> => {
+      const job = nextJob(current.current, skip, {
+        readyToFinish,
+        wantsNotes,
+        needsSplit: (piece) => needsSplit(piece) && canSplitAudio,
+      });
+      if (!job) return false;
+      const e = job.entry;
+      switch (job.kind) {
+        case 'finish-meeting':
+          finishMeeting(e);
+          return true;
+        case 'split-piece':
+          await splitLongPiece(e.id, job.piece.id);
+          return true;
+        case 'transcribe-piece': {
+          const piece = job.piece;
+          mark(e.id, true);
+          try {
+            const result = await transcribeAudio(piece.uri, piece.durationMs);
+            if (result.ok) updateSegment(e.id, piece.id, { status: 'done', text: result.text, error: null });
+            else if (result.transient) {
+              updateSegment(e.id, piece.id, { error: result.error });
+              skip.add(jobKey(job));
+            }
+            // A piece with nothing said (or nothing recorded) in it is simply empty, not a failure
+            else if (result.error.startsWith('No speech') || result.error.startsWith('No audio')) {
+              updateSegment(e.id, piece.id, { status: 'done', text: '', error: null });
+            } else updateSegment(e.id, piece.id, { status: 'failed', error: result.error });
+          } finally {
+            mark(e.id, false);
+          }
           return true;
         }
-        mark(e.id, true);
-        try {
-          const result = await transcribeAudio(piece.uri, piece.durationMs);
-          if (result.ok) updateSegment(e.id, piece.id, { status: 'done', text: result.text, error: null });
-          else if (result.transient) return false;
-          // A piece with nothing said in it is simply empty, not a failure
-          else if (result.error.startsWith('No speech')) updateSegment(e.id, piece.id, { status: 'done', text: '', error: null });
-          else updateSegment(e.id, piece.id, { status: 'failed', error: result.error });
-        } finally {
-          mark(e.id, false);
+        case 'transcribe-entry': {
+          if (await splitLargeRecording(e)) return true;
+          mark(e.id, true);
+          try {
+            const result = await transcribe(e);
+            if (!current.current.some((x) => x.id === e.id)) return true;
+            if (result.ok) update(e.id, { status: 'done', text: result.text, error: null });
+            else if (result.transient) {
+              update(e.id, { error: result.error });
+              skip.add(jobKey(job));
+            } else update(e.id, { status: 'failed', error: result.error });
+          } finally {
+            mark(e.id, false);
+          }
+          return true;
         }
-        return true;
+        case 'notes':
+          try {
+            await makeNotes(e.id);
+          } catch {
+            skip.add(jobKey(job));
+          }
+          return true;
       }
-      if (!e.segments && e.status === 'pending') {
-        if (await splitLargeRecording(e)) return true;
-        mark(e.id, true);
-        try {
-          const result = await transcribe(e);
-          if (!current.current.some((x) => x.id === e.id)) return true;
-          if (result.ok) update(e.id, { status: 'done', text: result.text, error: null });
-          else if (result.transient) {
-            update(e.id, { error: result.error });
-            return false;
-          } else update(e.id, { status: 'failed', error: result.error });
-        } finally {
-          mark(e.id, false);
-        }
-        return true;
-      }
-      if (wantsNotes(e)) {
-        try {
-          await makeNotes(e.id);
-        } catch {
-          return false;
-        }
-        return true;
-      }
-    }
-    return false;
-  }, [finishMeeting, makeNotes, mark, splitLargeRecording, splitLongPiece, update, updateSegment]);
+    },
+    [finishMeeting, makeNotes, mark, splitLargeRecording, splitLongPiece, update, updateSegment],
+  );
 
   // Works through everything waiting, one job at a time, when signed in to Wispra Cloud. A new
   // piece added meanwhile is picked up, because each turn looks at the list again.
@@ -576,7 +590,10 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     if (running.current || !transcriptionAvailable() || !syncAllowed(dataOwner.current, currentSession())) return;
     running.current = true;
     try {
-      await drainQueue(cloudAllowed, runNextJob);
+      // What failed for a passing reason is skipped until the next run (the next new recording, the
+      // app coming back, a sign-in)
+      const skip = new Set<string>();
+      await drainQueue(cloudAllowed, () => runNextJob(skip));
     } finally {
       running.current = false;
     }

@@ -64,7 +64,9 @@ export function useRecording(kind: EntryKind) {
       // iPhone: a keyboard listening session would share the microphone; it ends first
       await endSessionBeforeRecording();
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true, allowsBackgroundRecording: kind === 'meeting' });
-      await recorder.prepareToRecordAsync();
+      // With the options, iOS makes a new file for each recording; without them it records into the
+      // previous recording's file again (expo-audio's prepare), so recordings overwrote each other
+      await recorder.prepareToRecordAsync(SPEECH_RECORDING);
       recorder.record();
       const entry = { ...createEntry(kind), audioUri: recorder.uri };
       add(entry);

@@ -56,7 +56,9 @@ function recordings(n: number): string {
   return `${n} recording${n === 1 ? '' : 's'}`;
 }
 
-// What is missing, said where it matters: Dictate needs everything, Meetings only the sign-in
+// What is missing, said where it matters: the sign-in on Dictate and Meetings. The keyboard (iPhone)
+// and the mic button (Android) are behind the small button at the top of Dictate (anyAppButton),
+// so the tab keeps only the mic and the recent dictations (T-0154).
 export function setupReminders(state: SetupState, screen: 'dictate' | 'meetings'): Reminder[] {
   const out: Reminder[] = [];
   if (!state.signedIn) {
@@ -70,21 +72,33 @@ export function setupReminders(state: SetupState, screen: 'dictate' | 'meetings'
       action: { label: 'Sign in with Google', target: 'sign-in' },
     });
   }
-  if (screen !== 'dictate' || state.platform !== 'ios') return out;
-  if (!keyboardAdded(state)) {
-    out.push({
-      id: 'add-keyboard',
-      title: 'Add the Wispra keyboard',
-      body: 'To dictate in Zalo, Messenger or any app, turn on the Wispra keyboard and Allow Full Access in Settings.',
-      action: { label: 'Show me how', target: 'guide' },
-    });
-  } else if (!keyboardUsed(state)) {
-    out.push({
-      id: 'switch-keyboard',
-      title: 'Switch to the Wispra keyboard',
-      body: 'The Wispra keyboard is on. In any app, touch and hold the globe key 🌐 at the bottom left of the keyboard and choose Wispra.',
-      action: { label: 'Show me how', target: 'guide' },
-    });
-  }
   return out;
+}
+
+export interface AnyAppButton {
+  label: string;
+  // Something is still to set up: the button shows a dot
+  attention: boolean;
+  // iPhone: the guide (keyboard); Android: the mic button's setup
+  target: 'guide' | 'mic-setup';
+  accessibilityLabel: string;
+}
+
+// The small button at the top of Dictate that leads to dictating into other apps
+export function anyAppButton(state: SetupState): AnyAppButton {
+  if (state.platform === 'ios') {
+    const ready = keyboardAdded(state) && keyboardUsed(state);
+    return {
+      label: 'Keyboard',
+      attention: !ready,
+      target: 'guide',
+      accessibilityLabel: ready ? 'Wispra keyboard: how to use it' : 'Set up the Wispra keyboard to dictate in any app',
+    };
+  }
+  return {
+    label: 'Mic button',
+    attention: !state.bubbleOn,
+    target: 'mic-setup',
+    accessibilityLabel: state.bubbleOn ? 'Wispra mic button settings' : 'Set up the Wispra mic button to dictate in any app',
+  };
 }
