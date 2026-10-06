@@ -6,6 +6,7 @@ import { parseSessionMinutes } from './keyboard-session';
 import { parseTranscribeLanguage, type TranscribeLanguage } from './transcribe-language';
 import { freeName } from './transcribe-queue';
 import { parseDeletionBook, serializeDeletionBook, type DeletionBook } from './history-delete';
+import { parseLexicon, serializeLexicon, type LexiconEntry } from './lexicon';
 
 // Everything lives in the app's document directory, which the system never clears on its own
 // (unlike the cache directory).
@@ -72,6 +73,25 @@ export function saveHidden(ids: Set<string>): void {
   tmp.create();
   tmp.write(JSON.stringify([...ids]));
   tmp.moveSync(new File(root, 'hidden.json'), { overwrite: true });
+}
+
+// The words learned from corrections made in History (see lexicon.ts)
+export function loadLexicon(): LexiconEntry[] {
+  try {
+    const file = new File(root, 'lexicon.json');
+    return file.exists ? parseLexicon(file.textSync()) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLexicon(entries: LexiconEntry[]): void {
+  ensureDirs();
+  const tmp = new File(root, 'lexicon.json.tmp');
+  if (tmp.exists) tmp.delete();
+  tmp.create();
+  tmp.write(serializeLexicon(entries));
+  tmp.moveSync(new File(root, 'lexicon.json'), { overwrite: true });
 }
 
 // Deletions Wispra Cloud has not confirmed yet, and the time of the last list of deletions read

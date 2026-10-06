@@ -62,6 +62,13 @@ describe('planning a sync', () => {
     expect(plan.upserts.map((e) => [e.id, e.text])).toEqual([['pc-1', 'new']]);
   });
 
+  it('does not put a computer dictation the person fixed on the phone back to the cloud text (T-0179)', () => {
+    const fixed = { ...fromHistoryEntry(cloud({ id: 'pc-1', text: 'Cloud Code' })), text: 'Claude Code', originalText: 'Cloud Code' };
+    expect(planSync([fixed], [cloud({ id: 'pc-1', text: 'Cloud Code' })], new Set(), true).upserts).toEqual([]);
+    // Never an edit of the phone's own: those are not read back from the cloud at all
+    expect(planSync([dictation({ id: 'mobile-a', text: 'Claude', originalText: 'Cloud' })], [cloud({ id: 'mobile-a', text: 'Cloud' })], new Set(), true).upserts).toEqual([]);
+  });
+
   it('pushes never-pushed dictations, and pushed ones the cloud has lost', () => {
     const fresh = dictation({ id: 'mobile-fresh' });
     const kept = dictation({ id: 'mobile-kept', syncedAt: 's' });

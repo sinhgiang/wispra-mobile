@@ -31,6 +31,17 @@ export interface Entry {
   source?: 'phone' | 'computer';
   // When this phone dictation was last merged into the Wispra Cloud history
   syncedAt?: string;
+  // The first text, kept when the person fixed the words in History (T-0179); only set after a fix
+  originalText?: string;
+}
+
+// The text a fix leaves, and what it replaced; null when there is nothing to save (empty, or the
+// same as now). Like the computer's history.fix: the first text is kept as originalText for good.
+export function fixText(entry: Entry, text: string): { entry: Entry; before: string } | null {
+  const after = text.trim();
+  const before = entry.text ?? '';
+  if (!after || after === before) return null;
+  return { entry: { ...entry, text: after, originalText: entry.originalText ?? before }, before };
 }
 
 export type KindFilter = 'all' | EntryKind;

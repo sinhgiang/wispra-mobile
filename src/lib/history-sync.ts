@@ -79,7 +79,7 @@ export function planSync(local: Entry[], cloud: HistoryEntry[], hidden: Readonly
     if (isPhoneId(h.id) || hidden.has(h.id) || !h.text?.trim()) continue;
     const mine = byId.get(h.id);
     if (!mine) upserts.push(fromHistoryEntry(h));
-    else if (mine.source === 'computer' && mine.text !== h.text) upserts.push({ ...mine, text: h.text, title: h.app?.trim() || mine.title });
+    else if (mine.source === 'computer' && mine.originalText === undefined && mine.text !== h.text) upserts.push({ ...mine, text: h.text, title: h.app?.trim() || mine.title });
   }
 
   const inCloud = new Set(cloud.map((h) => h.id));

@@ -3,7 +3,8 @@ import { File, UploadType, type UploadOptions, type UploadResult } from 'expo-fi
 import { currentSession, validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
 import type { Entry } from './entries';
-import { loadTranscribeLanguage } from './storage';
+import { applyReplacements } from './lexicon';
+import { loadLexicon, loadTranscribeLanguage } from './storage';
 import { emptyAudio, NO_AUDIO, NO_SPEECH } from './transcribe-queue';
 import { withChosenLanguage } from './transcribe-language';
 import { readAnswer, type ReadAnswer, type VerboseTranscript } from './transcript-filter';
@@ -116,7 +117,20 @@ export async function transcribe(entry: Entry, options: TranscribeOptions = {}):
 // caller says one (an explicit `language` key, even undefined).
 export async function transcribeAudio(uri: string | null, durationMs: number, options: TranscribeOptions = {}): Promise<TranscribeResult> {
   if (!uri) return { ok: false, error: 'The audio file is not on this phone.' };
-  return transcribeFile(new File(uri), durationMs, validToken, withChosenLanguage(options, loadTranscribeLanguage()));
+  const result = await transcribeFile(new File(uri), durationMs, validToken, withChosenLanguage(options, loadTranscribeLanguage()));
+  return withLearnedWords(result);
+}
+
+// The words the person fixed in History (twice: see lexicon.ts) are written the way they fixed them,
+// after the transcription and before anything else uses the text (T-0179)
+export function withLearnedWords(result: TranscribeResult): TranscribeResult {
+  if (!result.ok) return result;
+  // The words are the person's own; if they cannot be read, the transcription is still theirs to keep
+  try {
+    return { ...result, text: applyReplacements(result.text, loadLexicon()) };
+  } catch {
+    return result;
+  }
 }
 
 // The file is sent by the phone's own uploader (URLSession on iPhone, OkHttp on Android), straight

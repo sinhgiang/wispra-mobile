@@ -19,7 +19,8 @@ import { commitWithRollback } from './cloud-gate';
 import { nextJob, pieceUpdate, runQueue, TRANSCRIBE_CONCURRENCY, type Job, type JobOutcome } from './transcribe-queue';
 import { File } from 'expo-file-system';
 
-import { defaultMeetingTitle, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
+import { defaultMeetingTitle, fixText, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
+import { learnFromFix, type WordPair } from './lexicon';
 import {
   finishedMeeting,
   needsSplit,
@@ -41,12 +42,14 @@ import {
   deleteAudio,
   loadEntries,
   loadHidden,
+  loadLexicon,
   loadDataOwner,
   loadDeletionBook,
   readInbox,
   removeEmptyLeftovers,
   saveEntries,
   saveHidden,
+  saveLexicon,
   saveDataOwner,
   saveDeletionBook,
 } from './storage';
@@ -75,6 +78,9 @@ interface EntriesApi {
   // `asUser`: the account the warning spoke of (null: this phone only); if another is signed in
   // now, nothing is deleted.
   removeAll(shownIds: readonly string[], asUser: string | null): Promise<number>;
+  // Saves the words a person fixed in a dictation and learns from them (T-0179); the first text is
+  // kept. Says why when nothing is saved.
+  fixEntry(id: string, text: string): FixResult;
   // Try again on a recording that could not be transcribed
   retry(id: string): Promise<void>;
   // Ids of the entries being transcribed or written up right now
@@ -99,6 +105,8 @@ interface EntriesApi {
   // Applies the choice to exactly the entries the question showed (shownIds); see ChoiceResult
   chooseAccount(choice: AccountChoice, shownIds: readonly string[]): ChoiceResult;
 }
+
+export type FixResult = { ok: true; learned: WordPair[] } | { ok: false; error: string };
 
 export interface SyncState {
   at: string | null;
@@ -399,6 +407,31 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       },
     }),
     [commit, forget, setPendingDeletes, myDeletes],
+  );
+
+  const fixEntry = useCallback(
+    (id: string, text: string): FixResult => {
+      const entry = current.current.find((e) => e.id === id);
+      if (!entry) return { ok: false, error: 'That entry no longer exists.' };
+      if (!text.trim()) return { ok: false, error: 'The text cannot be empty.' };
+      const fixed = fixText(entry, text);
+      // The same words: saved as they are, nothing to learn
+      if (!fixed) return { ok: true, learned: [] };
+      commit(current.current.map((e) => (e.id === id ? fixed.entry : e)));
+      const now = new Date().toISOString();
+      const known = loadLexicon();
+      const learning = learnFromFix(known, fixed.before, fixed.entry.text ?? '', now, newId);
+      // Saved only when a correction changed the words (a wrong form put back is a change too)
+      if (learning.entries !== known) {
+        try {
+          saveLexicon(learning.entries);
+        } catch {
+          return { ok: false, error: 'The text was saved, but what it teaches could not be.' };
+        }
+      }
+      return { ok: true, learned: learning.learned };
+    },
+    [commit],
   );
 
   const remove = useCallback(
@@ -809,6 +842,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       splitLongPiece,
       remove,
       removeAll,
+      fixEntry,
       retry,
       busy,
       transcribeWaiting,
@@ -821,7 +855,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       chooseAccount,
       cloudAllowed,
     }),
-    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, removeAll, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makeContentFor, ask, accountChoice, chooseAccount, cloudAllowed],
+    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, removeAll, fixEntry, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makeContentFor, ask, accountChoice, chooseAccount, cloudAllowed],
   );
   return <EntriesContext.Provider value={api}>{children}</EntriesContext.Provider>;
 }

@@ -7,7 +7,7 @@ import { confirmDelete } from '@/components/wispra/confirm-delete';
 import { EntryCard } from '@/components/wispra/entry-card';
 import { Button, Chip, Label, Title, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
-import { filterEntries, groupByDay, type Entry, type KindFilter } from '@/lib/entries';
+import { filterEntries, groupByDay, needsTranscription, type Entry, type KindFilter } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
 import { isNetworkError } from '@/lib/cloud-history';
 import { DELETE_ALL_NEEDS_CONNECTION, deletableEntries, deleteAllWarning, deletedAllMessage } from '@/lib/history-delete';
@@ -50,6 +50,8 @@ export default function HistoryScreen() {
 
   const open = (entry: Entry) => {
     if (entry.kind === 'meeting') router.push({ pathname: '/meeting/[id]', params: { id: entry.id } });
+    // A dictation opens with all of its words, Copy and Edit (T-0179)
+    else if (!needsTranscription(entry)) router.push({ pathname: '/entry/[id]', params: { id: entry.id } });
   };
 
   return (
