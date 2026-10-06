@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Body, Button, Card, Title, ui } from '@/components/wispra/ui';
+import { WordsSyncLine } from '@/components/wispra/words-sync-line';
 import { Gap, W } from '@/constants/wispra';
 import { newId } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
@@ -186,6 +187,7 @@ export default function LearnedScreen() {
         <Button small label="‹ Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/account'))} />
         <Title>Learned</Title>
         <Body style={styles.hint}>{LEARNED_HINT}</Body>
+        <WordsSyncLine />
 
         <Card style={styles.switchCard}>
           <SwitchRow

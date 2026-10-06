@@ -21,7 +21,8 @@ import { File } from 'expo-file-system';
 
 import { defaultMeetingTitle, fixText, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
 import { learnFromFix, type WordPair } from './lexicon';
-import { recordDictation, recordFix, refreshAutoTerms } from './learned/learned';
+import { EMPTY_STATE, recordDictation, recordFix, refreshAutoTerms } from './learned/learned';
+import { resetWordsSyncStatus } from './words-sync-store';
 import { AUTO_REFRESH_DELAY_MS } from './learned/constants';
 import {
   finishedMeeting,
@@ -56,6 +57,8 @@ import {
   saveHidden,
   saveLearned,
   saveLexicon,
+  saveVocabulary,
+  saveWordsSnapshot,
   saveDataOwner,
   saveDeletionBook,
 } from './storage';
@@ -142,6 +145,19 @@ function dictated(entry: Entry, text: string): Pick<Entry, 'learning'> {
     return { learning };
   } catch {
     return {};
+  }
+}
+
+// The phone's word lists, the picked-up words, the notes and the sync memory start again
+function clearWords(): void {
+  try {
+    saveLexicon([], true);
+    saveVocabulary([], true);
+    saveWordsSnapshot(null);
+    saveLearned(EMPTY_STATE);
+    resetWordsSyncStatus();
+  } catch {
+    // The words stay until the next try; nothing else depends on it
   }
 }
 
@@ -857,6 +873,9 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
         shownIds,
       );
       if (result === 'done') {
+        // "Use only the new account": what is on the phone leaves it, the words too (they were the previous
+        // account's); the new account's own come in at the next sync
+        if (choice === 'new-only') clearWords();
         setAccountChoice(null);
         void transcribeWaiting();
       } else {

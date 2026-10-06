@@ -238,6 +238,27 @@ describe('the Learned section’s list (T-0182, as on the computer)', () => {
     expect(list[0].pinned).toBe(false);
   });
 
+  it('every change the person makes dates the word, so the sync lets it win (T-0193 review)', () => {
+    const list = add([], 'Claude', ['Cloud', 'Clod']).entries;
+    const old = '2026-10-01T00:00:00.000Z';
+    const dated = list.map((e) => ({ ...e, lastSeen: old }));
+    const id = dated[0].id;
+    const at = '2026-10-07T00:00:00.000Z';
+    expect(updateEntry(dated, id, { pinned: true }, at)[0].lastSeen).toBe(at);
+    expect(updateEntry(dated, id, { enabled: false }, at)[0].lastSeen).toBe(at);
+    expect(updateEntry(dated, id, { heardAs: ['Clod'] }, at)[0].lastSeen).toBe(at);
+    // With no time given it is dated now
+    expect(Date.parse(updateEntry(dated, id, { pinned: true })[0].lastSeen)).toBeGreaterThan(Date.parse(old));
+    // A change that changes nothing leaves the word, and its date, as it was
+    expect(updateEntry(dated, id, { pinned: false, enabled: true }, at)).toBe(dated);
+    expect(updateEntry(dated, id, { heardAs: ['Cloud', 'Clod'] }, at)).toBe(dated);
+    // A clock that is behind the word's own date never makes the change older
+    const future = dated.map((e) => ({ ...e, lastSeen: '2030-01-01T00:00:00.000Z' }));
+    expect(Date.parse(updateEntry(future, id, { pinned: true }, at)[0].lastSeen)).toBeGreaterThan(Date.parse('2030-01-01T00:00:00.000Z'));
+    // The list given is not changed
+    expect(dated[0].pinned).toBe(false);
+  });
+
   it('Delete removes the entry', () => {
     const list = add(add([], 'A', ['x']).entries, 'B', ['y']).entries;
     expect(removeEntry(list, list[0].id).map((e) => e.term)).toEqual(['B']);
