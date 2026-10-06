@@ -109,13 +109,14 @@ export type PunctuationCall = (system: string, user: string, maxTokens: number, 
 
 // The piece with its punctuation, or as it came when it needs none, when the model cannot be asked, or
 // when it did not keep the words
-export async function punctuate(call: PunctuationCall, text: string, previous: string): Promise<Punctuated> {
+// `style`: the user's writing style (notes and habits, see learned.styleBlock), put before the instructions as on the computer
+export async function punctuate(call: PunctuationCall, text: string, previous: string, style = ''): Promise<Punctuated> {
   const original = text.trim();
   if (!original) return { text, source: 'original' };
   const fallback = capitalizeStart(original, previous);
   if (!needsPunctuation(original)) return { text: fallback, source: fallback === original ? 'original' : 'rules' };
   try {
-    const answer = (await call(PUNCTUATION_PROMPT, punctuationRequest(original, previous), 1500, 0)) as { text?: unknown };
+    const answer = (await call(`${style}${PUNCTUATION_PROMPT}`, punctuationRequest(original, previous), 1500, 0)) as { text?: unknown };
     const edited = typeof answer?.text === 'string' ? answer.text.trim() : '';
     // Only the same words are accepted: a model that rewrote, shortened or added something is ignored
     if (edited && sameWords(original, edited)) return { text: edited, source: 'model' };

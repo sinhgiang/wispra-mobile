@@ -6,14 +6,20 @@ import { render } from '@testing-library/react-native';
 
 let mockAllowed = true;
 const mockHeard: Record<string, string> = {};
-const mockChat: { user: string }[] = [];
+const mockChat: { user: string; system: string }[] = [];
+let mockStyleNotes = '';
 let mockChatAnswer: (user: string) => unknown = () => ({ text: '' });
 const mockListeners: ((chunk: unknown) => void)[] = [];
 const mockNotes: string[] = [];
 const mockDelivered: { utterance: string; index: number; text: string; last: boolean; failed: boolean }[] = [];
 
 jest.mock('expo-file-system', () => ({ File: class { exists = false; constructor(_uri: string) {} delete() {} } }));
-jest.mock('@/lib/storage', () => ({ loadSessionMinutes: () => 240, sessionEndedByUser: () => false }));
+jest.mock('@/lib/storage', () => ({
+  loadSessionMinutes: () => 240,
+  sessionEndedByUser: () => false,
+  loadLearning: () => ({ learning: true, autoLearn: true }),
+  loadLearned: () => ({ dismissed: [], styleNotes: mockStyleNotes, styleOff: [], autoTerms: [], evalSince: '', evalRecords: [] }),
+}));
 jest.mock('@/lib/entries-store', () => ({ useEntries: () => ({ cloudAllowed: () => mockAllowed }) }));
 jest.mock('@/lib/transcriber', () => ({
   transcribeAudio: async (path: string) => ({ ok: true, text: mockHeard[path] ?? '' }),
@@ -22,8 +28,8 @@ jest.mock('@/lib/transcriber', () => ({
 jest.mock('@/lib/punctuation', () => ({ ...(jest.requireActual('@/lib/punctuation') as object), PUNCTUATION_WAIT_MS: 50 }));
 jest.mock('@/lib/use-session', () => ({ useSession: () => null }));
 jest.mock('@/lib/ai', () => ({
-  chatJson: async (_system: string, user: string) => {
-    mockChat.push({ user });
+  chatJson: async (system: string, user: string) => {
+    mockChat.push({ user, system });
     return mockChatAnswer(user);
   },
 }));
@@ -52,6 +58,7 @@ beforeEach(() => {
   mockListeners.length = 0;
   mockDelivered.length = 0;
   mockNotes.length = 0;
+  mockStyleNotes = '';
   mockChatAnswer = () => ({ text: '' });
 });
 
@@ -119,6 +126,18 @@ describe('the keyboard types punctuated words', () => {
     // The log says it ran out of time, and holds none of the words
     expect(mockNotes.filter((n) => /punctuation: timeout in \d+ ms, \d+ words/.test(n))).toHaveLength(2);
     expect(mockNotes.join(' ')).not.toMatch(/chào|báo cáo/);
+  });
+
+  it('tells the AI step how the user writes (the style notes), before its instructions', async () => {
+    mockStyleNotes = 'short sentences, never exclamation marks';
+    mockHeard['s.m4a'] = 'ngoài kia Không có sự lắng nghe Cho nên tôi nghĩ';
+    mockChatAnswer = () => ({ text: 'Ngoài kia, không có sự lắng nghe. Cho nên, tôi nghĩ.' });
+    await render(<KeyboardSessionBridge />);
+    mockListeners[0](piece('s.m4a', 'u8', 0, true));
+    await settle();
+    expect(mockChat[0].system.startsWith('The user has personal writing conventions')).toBe(true);
+    expect(mockChat[0].system).toContain('- In their own words: short sentences, never exclamation marks');
+    expect(mockChat[0].system).toContain('You are a transcription editor');
   });
 
   it('notes how the step went in the log, without the words', async () => {

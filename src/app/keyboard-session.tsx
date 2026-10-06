@@ -6,7 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Body, Button, MicGlyph, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { useEntries } from '@/lib/entries-store';
-import { minutesLeft, sessionGate, sessionLabel, SPEAK_FLOW } from '@/lib/keyboard-session';
+import { loadSession } from '@/lib/cloud-auth';
+import { ACCOUNT_RETRY_MS, minutesLeft, sessionGate, sessionLabel, SPEAK_FLOW } from '@/lib/keyboard-session';
 import { loadSessionMinutes, setSessionEndedByUser } from '@/lib/storage';
 import { useSession, useSessionLoaded } from '@/lib/use-session';
 import { endSession, noteKeyboardLog, onSessionState, sessionState, startSession, type SessionState } from '@/modules/wispra-keyboard-bridge';
@@ -25,7 +26,26 @@ export default function KeyboardSessionScreen() {
   const [now, setNow] = useState(Date.now());
   const started = useRef(false);
   const allowed = cloudAllowed();
-  const gate = sessionGate({ sessionLoaded, dataLoaded, signedIn: session !== null, allowed });
+  // How long the account has been waited for (T-0182 review): the page asks the keychain again every few
+  // seconds, and past the limit says it cannot read it and offers Try again, never "Checking…" for ever
+  const [waited, setWaited] = useState(0);
+  const waitingSince = useRef(Date.now());
+  const waiting = !sessionLoaded || !dataLoaded;
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(() => {
+      setWaited(Date.now() - waitingSince.current);
+      if (!sessionLoaded) void loadSession().catch(() => undefined);
+    }, ACCOUNT_RETRY_MS);
+    return () => clearInterval(timer);
+  }, [waiting, sessionLoaded]);
+  const tryAgain = () => {
+    waitingSince.current = Date.now();
+    setWaited(0);
+    noteKeyboardLog('account: the page tried again to read the sign-in');
+    void loadSession().catch(() => undefined);
+  };
+  const gate = sessionGate({ sessionLoaded, dataLoaded, signedIn: session !== null, allowed, waitedMs: waited });
   const minutes = loadSessionMinutes();
 
   // The keyboard log says what this page decided about the account (never the account itself)
@@ -63,6 +83,21 @@ export default function KeyboardSessionScreen() {
       <SafeAreaView style={[ui.screen, styles.screen]}>
         <View style={styles.centre}>
           <Text style={styles.title}>Checking your account…</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (gate === 'unreadable') {
+    return (
+      <SafeAreaView style={[ui.screen, styles.screen]}>
+        <View style={styles.centre}>
+          <Text style={styles.title}>Wispra could not read your account yet</Text>
+          <Body style={styles.text}>
+            Your account is not lost. If your phone was just restarted, unlock it, then try again.
+          </Body>
+          <Button kind="primary" label="Try again" onPress={tryAgain} />
+          <Button label="Open Account" onPress={() => router.replace('/account')} />
         </View>
       </SafeAreaView>
     );

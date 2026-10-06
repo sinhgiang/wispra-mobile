@@ -63,7 +63,8 @@ jest.mock('@/modules/wispra-keyboard-bridge', () => ({
 }));
 jest.mock('@/lib/transcriber', () => ({ transcriptionAvailable: () => true }));
 jest.mock('@/lib/cloud-history', () => ({ readUsage: () => new Promise(() => undefined) }));
-jest.mock('@/lib/cloud-auth', () => ({ signOut: jest.fn() }));
+const mockLoadSession = jest.fn(async () => null);
+jest.mock('@/lib/cloud-auth', () => ({ signOut: jest.fn(), loadSession: () => mockLoadSession() }));
 jest.mock('@/lib/sign-in', () => ({ signInWithGoogle: jest.fn() }));
 
 // eslint-disable-next-line import/first
@@ -87,6 +88,7 @@ const android: SetupState = { platform: 'android', signedIn: true, keyboard: nul
 beforeEach(() => {
   mockPush.mockClear();
   mockReplace.mockClear();
+  mockLoadSession.mockClear();
   mockSaveMinutes.mockClear();
   mockSavedLanguage = 'vi';
   mockLanguageSaves.length = 0;
@@ -343,6 +345,57 @@ describe("the page the keyboard's mic opens, and the account (T-0182)", () => {
     await view.rerender(<KeyboardSessionScreen />);
     expect(screen.queryByText('Sign in first')).toBeNull();
     expect(mockStartSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not wait for ever for an account the keychain will not give (a locked phone): it asks again, then says so and offers Try again', async () => {
+    jest.useFakeTimers();
+    try {
+      mockSessionLoaded = false;
+      mockSignedIn = false;
+      mockCloudAllowed = false;
+      await render(<KeyboardSessionScreen />);
+      expect(screen.getByText('Checking your account…')).toBeTruthy();
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(5000);
+      });
+      // Still waiting, and it has asked the keychain again by itself
+      expect(screen.getByText('Checking your account…')).toBeTruthy();
+      expect(mockLoadSession.mock.calls.length).toBeGreaterThanOrEqual(2);
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(3000);
+      });
+      expect(screen.getByText('Wispra could not read your account yet')).toBeTruthy();
+      expect(screen.getByText(/Your account is not lost/)).toBeTruthy();
+      expect(screen.queryByText('Sign in first')).toBeNull();
+      const asked = mockLoadSession.mock.calls.length;
+      await fireEvent.press(screen.getByText('Try again'));
+      expect(mockLoadSession.mock.calls.length).toBeGreaterThan(asked);
+      expect(screen.getByText('Checking your account…')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('goes on by itself when the keychain answers after the limit', async () => {
+    jest.useFakeTimers();
+    try {
+      mockSessionLoaded = false;
+      mockSignedIn = false;
+      mockCloudAllowed = false;
+      const view = await render(<KeyboardSessionScreen />);
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(8000);
+      });
+      expect(screen.getByText('Wispra could not read your account yet')).toBeTruthy();
+      mockSessionLoaded = true;
+      mockSignedIn = true;
+      mockCloudAllowed = true;
+      await view.rerender(<KeyboardSessionScreen />);
+      expect(screen.queryByText('Wispra could not read your account yet')).toBeNull();
+      expect(mockStartSession).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('says "Sign in first" only when nobody is signed in', async () => {

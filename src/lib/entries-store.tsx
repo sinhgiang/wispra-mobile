@@ -21,6 +21,8 @@ import { File } from 'expo-file-system';
 
 import { defaultMeetingTitle, fixText, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
 import { learnFromFix, type WordPair } from './lexicon';
+import { recordDictation, recordFix, refreshAutoTerms } from './learned/learned';
+import { AUTO_REFRESH_DELAY_MS } from './learned/constants';
 import {
   finishedMeeting,
   needsSplit,
@@ -42,6 +44,8 @@ import {
   deleteAudio,
   loadEntries,
   loadHidden,
+  loadVocabulary,
+  loadLearned,
   loadLearning,
   loadLexicon,
   loadDataOwner,
@@ -50,6 +54,7 @@ import {
   removeEmptyLeftovers,
   saveEntries,
   saveHidden,
+  saveLearned,
   saveLexicon,
   saveDataOwner,
   saveDeletionBook,
@@ -124,6 +129,21 @@ const deleteCloud: DeleteSyncCloud = {
   deleteAll: deleteAllHistory,
   read: (since, asUser) => readHistory(since, asUser),
 };
+
+// What a dictation records when its words arrive (T-0182): whether "Learn my words" was on, which the
+// statistics compare; the count of its words. Never fails the transcription.
+function dictated(entry: Entry, text: string): Pick<Entry, 'learning'> {
+  if (entry.kind !== 'dictation') return {};
+  try {
+    const learning = loadLearning().learning;
+    const state = loadLearned();
+    const next = recordDictation(state, text.trim().split(/\s+/).filter(Boolean).length, learning);
+    if (next !== state) saveLearned(next);
+    return { learning };
+  } catch {
+    return {};
+  }
+}
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -419,6 +439,22 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       const fixed = fixText(entry, text);
       // The same words: saved as they are, nothing to learn
       const learningOn = loadLearning().learning;
+      // The statistics count the fix whether or not learning is on
+      if (fixed) {
+        try {
+          const state = loadLearned();
+          const next = recordFix(state, {
+            original: entry.originalText ?? fixed.before,
+            before: fixed.before,
+            after: fixed.entry.text ?? '',
+            createdAt: entry.createdAt,
+            learning: entry.learning,
+          });
+          if (next !== state) saveLearned(next);
+        } catch {
+          // The statistics are a rough guide; the fix itself goes on
+        }
+      }
       if (!fixed) return { ok: true, learned: [], learning: learningOn };
       commit(current.current.map((e) => (e.id === id ? fixed.entry : e)));
       // The fix is saved either way; with "Learn my words" off nothing is learned from it
@@ -438,6 +474,31 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
     },
     [commit],
   );
+
+  // The words picked up from History are worked out a moment after History changes, so the next
+  // transcription finds them ready (the computer does the same, in the background)
+  useEffect(() => {
+    if (!loaded) return;
+    const timer = setTimeout(() => {
+      try {
+        const settings = loadLearning();
+        if (!settings.learning || !settings.autoLearn) return;
+        const state = loadLearned();
+        const next = refreshAutoTerms({
+          entries: current.current,
+          vocabulary: loadVocabulary(),
+          lexicon: loadLexicon(),
+          state,
+          learning: settings.learning,
+          autoLearn: settings.autoLearn,
+        });
+        if (next !== state) saveLearned(next);
+      } catch {
+        // Only a help for the speech recogniser
+      }
+    }, AUTO_REFRESH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [entries, loaded]);
 
   const remove = useCallback(
     (id: string) => {
@@ -589,7 +650,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
           try {
             const result = await transcribe(e);
             if (!current.current.some((x) => x.id === e.id)) return 'done';
-            if (result.ok) update(e.id, { status: 'done', text: result.text, error: null });
+            if (result.ok) update(e.id, { status: 'done', text: result.text, error: null, ...dictated(e, result.text) });
             else if (result.transient) {
               update(e.id, { error: result.error });
               return 'later';
@@ -672,7 +733,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       try {
         const result = await transcribe(entry);
         if (!current.current.some((e) => e.id === id)) return;
-        if (result.ok) update(id, { status: 'done', text: result.text, error: null });
+        if (result.ok) update(id, { status: 'done', text: result.text, error: null, ...dictated(entry, result.text) });
         // A passing failure waits in the queue, which tries it again by itself, as the card says
         else update(id, { status: result.transient ? 'pending' : 'failed', error: result.error });
       } finally {

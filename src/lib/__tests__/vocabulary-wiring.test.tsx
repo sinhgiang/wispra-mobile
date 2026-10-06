@@ -9,10 +9,13 @@ import type { LexiconEntry } from '../lexicon';
 let mockVocabulary: string[] = [];
 let mockLexicon: LexiconEntry[] = [];
 let mockLearning = true;
+let mockAutoLearn = true;
+let mockAutoTerms: string[] = [];
 let mockAnswer = ' mở git hub lên rồi cap cut';
 const mockUploads: { parameters: Record<string, string> }[] = [];
 const mockListeners: ((chunk: unknown) => void)[] = [];
 const mockDelivered: { text: string }[] = [];
+const mockNotes: string[] = [];
 
 jest.mock('expo-file-system', () => ({
   UploadType: { BINARY_CONTENT: 0, MULTIPART: 1 },
@@ -34,7 +37,8 @@ jest.mock('../storage', () => ({
   loadTranscribeLanguage: () => 'vi',
   loadVocabulary: () => [...mockVocabulary],
   loadLexicon: () => JSON.parse(JSON.stringify(mockLexicon)),
-  loadLearning: () => ({ learning: mockLearning, autoLearn: true }),
+  loadLearning: () => ({ learning: mockLearning, autoLearn: mockAutoLearn }),
+  loadLearned: () => ({ autoTerms: [...mockAutoTerms] }),
   loadSessionMinutes: () => 240,
   sessionEndedByUser: () => false,
 }));
@@ -51,7 +55,7 @@ jest.mock('@/modules/wispra-keyboard-bridge', () => ({
     mockDelivered.push({ text });
     return true;
   },
-  noteKeyboardLog: () => undefined,
+  noteKeyboardLog: (text: string) => mockNotes.push(text),
 }));
 
 // eslint-disable-next-line import/first
@@ -76,10 +80,13 @@ beforeEach(() => {
   mockVocabulary = [];
   mockLexicon = [];
   mockLearning = true;
+  mockAutoLearn = true;
+  mockAutoTerms = [];
   mockAnswer = ' mở git hub lên rồi cap cut';
   mockUploads.length = 0;
   mockListeners.length = 0;
   mockDelivered.length = 0;
+  mockNotes.length = 0;
 });
 
 describe('the Custom vocabulary in every transcription', () => {
@@ -103,11 +110,23 @@ describe('the Custom vocabulary in every transcription', () => {
     expect(mockDelivered[0].text).not.toMatch(/git hub|cap cut/);
   });
 
+  it('says in the keyboard log that the terms were sent and how the answer came back, never the words', async () => {
+    mockVocabulary = OWNER;
+    await transcribeAudio('file:///a.m4a', 3_000);
+    expect(mockNotes).toHaveLength(1);
+    expect(mockNotes[0]).toMatch(/^transcribe: prompt of 5 terms sent, text came back in \d+ ms$/);
+    mockNotes.length = 0;
+    mockVocabulary = [];
+    await transcribeAudio('file:///a.m4a', 3_000);
+    expect(mockNotes[0]).toMatch(/^transcribe: no prompt, text came back/);
+  });
+
   it('drops an answer that is only the prompt echoed back (near silence)', async () => {
     mockVocabulary = OWNER;
     mockAnswer = ' Github, Capcut, Timio, Wispra, TikTok.';
     const result = await transcribeAudio('file:///a.m4a', 3_000);
     expect(result.ok).toBe(false);
+    expect(mockNotes.join(' | ')).toMatch(/only the prompt echoed back: dropped/);
   });
 });
 
@@ -128,5 +147,28 @@ describe('what was learned from fixes, with the switch', () => {
     mockAnswer = ' dùng cloud với git hub';
     expect(await transcribeAudio('file:///a.m4a', 3_000)).toEqual({ ok: true, text: 'dùng cloud với Github' });
     expect(mockUploads[0].parameters.prompt).toBe('Github.');
+  });
+});
+
+
+describe('the words picked up from History', () => {
+  it('fill the room left in the prompt, after the vocabulary and the learned words', async () => {
+    mockVocabulary = ['Github'];
+    mockLexicon = [entry('Claude', ['cloud'], 2)];
+    mockAutoTerms = ['Supabase', 'Github'];
+    await transcribeAudio('file:///a.m4a', 3_000);
+    expect(mockUploads[0].parameters.prompt).toBe('Github, Claude, Supabase.');
+  });
+
+  it('are left out when Learn my vocabulary from History is off, or learning is', async () => {
+    mockVocabulary = ['Github'];
+    mockAutoTerms = ['Supabase'];
+    mockAutoLearn = false;
+    await transcribeAudio('file:///a.m4a', 3_000);
+    expect(mockUploads[0].parameters.prompt).toBe('Github.');
+    mockAutoLearn = true;
+    mockLearning = false;
+    await transcribeAudio('file:///a.m4a', 3_000);
+    expect(mockUploads[1].parameters.prompt).toBe('Github.');
   });
 });

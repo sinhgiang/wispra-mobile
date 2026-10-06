@@ -426,3 +426,38 @@ export function buildSttPrompt(terms: string[]): string | undefined {
   const list = terms.map((t) => t.trim()).filter(Boolean).slice(0, STT_PROMPT_MAX_TERMS);
   return list.length > 0 ? `${list.join(', ')}.` : undefined;
 }
+
+// ── Two more readings of a fix, used by the writing style and the statistics (T-0182) ──
+const MAX_DELETED_WORDS = 2;
+
+// The words (1 or 2) a fix only removed: a filler the person keeps cutting ("kiểu như")
+export function extractDeletions(before: string, after: string): string[] {
+  const a = words(before);
+  const b = words(after);
+  if (a.length === 0 || b.length === 0 || a.length * b.length > MAX_DIFF_CELLS) return [];
+
+  const { hunks } = diffWords(a, b);
+  if (hunks.length > 1) {
+    const changed = hunks.reduce((sum, h) => sum + Math.max(h.del.length, h.ins.length), 0);
+    if (hunks.length > MAX_HUNKS || changed / Math.max(a.length, b.length) > MAX_CHANGED_RATIO) return [];
+  }
+
+  const out: string[] = [];
+  for (const h of hunks) {
+    if (h.ins.length > 0 || h.del.length === 0 || h.del.length > MAX_DELETED_WORDS) continue;
+    const phrase = normKey(h.del.join(' '));
+    if (!out.includes(phrase)) out.push(phrase);
+  }
+  return out;
+}
+
+// How many words a fix changed (punctuation and plain capitals not counted); null when the texts are too long to compare
+export function countWordEdits(before: string, after: string): number | null {
+  const a = words(before);
+  const b = words(after);
+  if (a.length * b.length > MAX_DIFF_CELLS) return null;
+  const { hunks, recased } = diffWords(a, b);
+  let edits = hunks.reduce((sum, h) => sum + Math.max(h.del.length, h.ins.length), 0);
+  for (const r of recased) if (!isPlainCapitalization(r.del[0], r.ins[0])) edits += 1;
+  return edits;
+}

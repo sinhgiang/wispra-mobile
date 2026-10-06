@@ -33,6 +33,8 @@ export interface Entry {
   syncedAt?: string;
   // The first text, kept when the person fixed the words in History (T-0179); only set after a fix
   originalText?: string;
+  // Whether "Learn my words" was on when this was dictated (the statistics compare the two)
+  learning?: boolean;
 }
 
 // The text a fix leaves, and what it replaced; null when there is nothing to save (empty, or the

@@ -25,6 +25,7 @@ const SIGNS: { match: RegExp; meaning: string }[] = [
   { match: /account: .*(signed out|read, signed out)/i, meaning: 'Wispra had no sign-in to use (it was signed out, or the refresh was refused and nothing newer was stored). Sign in again in Account.' },
   { match: /account: .*could not be read/i, meaning: 'The phone would not give Wispra its saved sign-in (usually a locked phone). It is not signed out: the next try reads it again.' },
   { match: /microphone is stopped/i, meaning: 'Wispra runs but another app has the microphone, so nothing was being recorded. The keyboard said so.' },
+  { match: /only the prompt echoed back/i, meaning: 'Whisper answered with the list of your own words (near silence): that part was dropped, as on the computer.' },
   { match: /punctuation: timeout/i, meaning: 'The punctuation step did not answer in a few seconds: the words were typed without full stops and commas.' },
   { match: /no words after \d+ s/i, meaning: 'The words did not come back in time.' },
 ];

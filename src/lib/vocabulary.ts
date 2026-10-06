@@ -157,7 +157,15 @@ export function addTerms(list: string[], input: string): string[] {
     .map((p) => p.trim())
     .filter(Boolean);
   const out = [...list];
-  for (const part of parts) if (!out.includes(part)) out.push(part);
+  // The same letters once spaces, hyphens, case and accents are set aside ("github", "Git Hub") count as the same term
+  const keys = new Set(out.map(spellingKey));
+  for (const part of parts) {
+    const key = spellingKey(part);
+    if (key && !keys.has(key)) {
+      keys.add(key);
+      out.push(part);
+    }
+  }
   return out;
 }
 

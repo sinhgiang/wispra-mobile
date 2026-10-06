@@ -7,7 +7,8 @@ import { useEntries } from '@/lib/entries-store';
 import { actionFor, pieceFailed, shouldAutoStartSession, wordsFrom } from '@/lib/keyboard-session';
 import { capitalizeStart, punctuate, PUNCTUATION_WAIT_MS, tailOf, withDeadline } from '@/lib/punctuation';
 import { transcribeAudio } from '@/lib/transcriber';
-import { loadSessionMinutes, sessionEndedByUser } from '@/lib/storage';
+import { styleBlock } from '@/lib/learned/learned';
+import { loadLearned, loadLearning, loadSessionMinutes, sessionEndedByUser } from '@/lib/storage';
 import { useSession } from '@/lib/use-session';
 import { deliverText, keyboardStatus, noteKeyboardLog, onSessionChunk, sessionState, startSession, type SessionChunk } from '@/modules/wispra-keyboard-bridge';
 
@@ -15,7 +16,18 @@ import { deliverText, keyboardStatus, noteKeyboardLog, onSessionChunk, sessionSt
 // The pieces come from the native session while the keyboard's mic is red; this runs while Wispra
 // is in the background too, since the session keeps it running.
 export function KeyboardSessionBridge() {
-  const { cloudAllowed } = useEntries();
+  const { cloudAllowed, entries } = useEntries();
+  // The user's writing style for the punctuation step: read at each piece (T-0182)
+  const entriesNow = useRef(entries);
+  entriesNow.current = entries;
+  const style = useRef<() => string>(() => '');
+  style.current = () => {
+    try {
+      return styleBlock(entriesNow.current ?? [], loadLearned(), loadLearning().learning);
+    } catch {
+      return '';
+    }
+  };
   // Read at each piece, so a sign-in change during a session is seen at once
   const allowed = useRef(cloudAllowed);
   allowed.current = cloudAllowed;
@@ -26,7 +38,7 @@ export function KeyboardSessionBridge() {
 
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
-    const sub = onSessionChunk((chunk) => void handle(chunk, () => allowed.current()));
+    const sub = onSessionChunk((chunk) => void handle(chunk, () => allowed.current(), () => style.current()));
     // Brought back to the front with the keyboard in use: the session starts by itself (T-0178)
     const state = AppState.addEventListener('change', (next) => {
       if (next === 'active') void autoStartSession(() => allowed.current());
@@ -73,7 +85,7 @@ const wordCountOf = (text: string) => text.trim().split(/\s+/).length;
 const refuse = () => Promise.reject(new Error('Wispra Cloud may not be used now'));
 
 // The words of one piece with their dots, commas and capitals (T-0178, point 4)
-async function withPunctuation(chunk: SessionChunk, words: string, canAsk: boolean): Promise<string> {
+async function withPunctuation(chunk: SessionChunk, words: string, canAsk: boolean, style: string): Promise<string> {
   const before = tails.get(chunk.utterance) ?? Promise.resolve('');
   let typed = words;
   const mine = before.then(async (previous) => {
@@ -81,7 +93,7 @@ async function withPunctuation(chunk: SessionChunk, words: string, canAsk: boole
     try {
       const started = Date.now();
       // Never more than a few seconds: past that the piece is typed as it came, with its first capital
-      const result = await withDeadline(punctuate(canAsk ? chatJson : refuse, words, previous), PUNCTUATION_WAIT_MS, () => ({
+      const result = await withDeadline(punctuate(canAsk ? chatJson : refuse, words, previous, style), PUNCTUATION_WAIT_MS, () => ({
         text: capitalizeStart(words.trim(), previous),
         source: 'timeout' as const,
       }));
@@ -100,7 +112,7 @@ async function withPunctuation(chunk: SessionChunk, words: string, canAsk: boole
   return typed;
 }
 
-async function handle(chunk: SessionChunk, cloudAllowed: () => boolean): Promise<void> {
+async function handle(chunk: SessionChunk, cloudAllowed: () => boolean, style: () => string): Promise<void> {
   const action = actionFor(chunk, cloudAllowed());
   let words = '';
   let failed = false;
@@ -116,7 +128,7 @@ async function handle(chunk: SessionChunk, cloudAllowed: () => boolean): Promise
   }
   // Never held up by this step: without it the piece is typed as it came
   try {
-    words = await withPunctuation(chunk, words, cloudAllowed());
+    words = await withPunctuation(chunk, words, cloudAllowed(), style());
   } catch {
     tails.delete(chunk.utterance);
   }

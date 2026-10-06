@@ -84,10 +84,16 @@ export function shouldAutoStartSession(input: AutoStartInput): boolean {
 // loaded, and did not look again when the sign-in arrived: an account that was there looked signed out.
 // 'checking' until both are loaded; 'sign-in' only when no one is signed in; 'choose' when someone is but
 // the phone's data belongs to another account (the question of the two accounts waits).
-export type SessionGate = 'checking' | 'sign-in' | 'choose' | 'ready';
+// 'unreadable': the sign-in was still not read after ACCOUNT_CHECK_LIMIT_MS (the keychain does not answer, as
+// on a phone locked since it restarted): the page says so and offers Try again, never "Checking…" for ever
+export type SessionGate = 'checking' | 'unreadable' | 'sign-in' | 'choose' | 'ready';
 
-export function sessionGate(input: { sessionLoaded: boolean; dataLoaded: boolean; signedIn: boolean; allowed: boolean }): SessionGate {
-  if (!input.sessionLoaded || !input.dataLoaded) return 'checking';
+// How long the page waits for the saved sign-in, asking again every ACCOUNT_RETRY_MS, before it says it cannot read it
+export const ACCOUNT_CHECK_LIMIT_MS = 6000;
+export const ACCOUNT_RETRY_MS = 2000;
+
+export function sessionGate(input: { sessionLoaded: boolean; dataLoaded: boolean; signedIn: boolean; allowed: boolean; waitedMs?: number }): SessionGate {
+  if (!input.sessionLoaded || !input.dataLoaded) return (input.waitedMs ?? 0) >= ACCOUNT_CHECK_LIMIT_MS ? 'unreadable' : 'checking';
   if (!input.signedIn) return 'sign-in';
   return input.allowed ? 'ready' : 'choose';
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  ACCOUNT_CHECK_LIMIT_MS,
   actionFor,
   AUTO_START_WINDOW_MS,
   DEFAULT_SESSION_MINUTES,
@@ -90,6 +91,14 @@ describe('what the page the keyboard opens says about the account (T-0182)', () 
   it('is checking, never "sign in", until the saved sign-in and the data are both read', () => {
     expect(sessionGate({ ...base, sessionLoaded: false, signedIn: false, allowed: false })).toBe('checking');
     expect(sessionGate({ ...base, dataLoaded: false, allowed: false })).toBe('checking');
+  });
+
+  it('says it cannot read the account, with a way out, once the wait passes the limit, and never before', () => {
+    const waiting = { ...base, sessionLoaded: false, signedIn: false, allowed: false };
+    expect(sessionGate({ ...waiting, waitedMs: ACCOUNT_CHECK_LIMIT_MS - 1 })).toBe('checking');
+    expect(sessionGate({ ...waiting, waitedMs: ACCOUNT_CHECK_LIMIT_MS })).toBe('unreadable');
+    // Once it is read, the wait does not matter
+    expect(sessionGate({ ...base, waitedMs: 60_000 })).toBe('ready');
   });
 
   it('asks to sign in only when no one is signed in, and to answer the question when someone is but the data belongs to another account', () => {

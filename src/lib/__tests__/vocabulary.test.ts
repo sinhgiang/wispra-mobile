@@ -58,6 +58,9 @@ describe('the list', () => {
     expect(addTerms(['Github'], 'Github')).toEqual(['Github']);
     expect(addTerms(['Github'], 'Capcut, Timio; Wispra\nTikTok ,, ')).toEqual(['Github', 'Capcut', 'Timio', 'Wispra', 'TikTok']);
     expect(addTerms(['a'], '   ')).toEqual(['a']);
+    // The same letters in another case, spacing or accents are the same term (T-0182 review)
+    expect(addTerms(['Github'], 'github, Git Hub, Capcut')).toEqual(['Github', 'Capcut']);
+    expect(addTerms(['Nguyễn Văn A'], 'Nguyen Van A')).toEqual(['Nguyễn Văn A']);
     expect(removeTerm(['a', 'b'], 'a')).toEqual(['b']);
   });
 

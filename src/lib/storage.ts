@@ -9,6 +9,7 @@ import { parseDeletionBook, serializeDeletionBook, type DeletionBook } from './h
 import { parseLearning, serializeLearning, type LearningSettings, DEFAULT_LEARNING } from './learning';
 import { parseLexicon, serializeLexicon, type LexiconEntry } from './lexicon';
 import { parseVocabulary } from './vocabulary';
+import { EMPTY_STATE, parseLearnedState, serializeLearnedState, type LearnedState } from './learned/learned';
 
 // Everything lives in the app's document directory, which the system never clears on its own
 // (unlike the cache directory).
@@ -113,6 +114,25 @@ export function saveVocabulary(terms: string[]): void {
   tmp.create();
   tmp.write(JSON.stringify(terms));
   tmp.moveSync(new File(root, 'vocabulary.json'), { overwrite: true });
+}
+
+// What the Learned section remembers: words waved away, the writing style notes, picked-up words, statistics
+export function loadLearned(): LearnedState {
+  try {
+    const file = new File(root, 'learned.json');
+    return file.exists ? parseLearnedState(file.textSync()) : EMPTY_STATE;
+  } catch {
+    return EMPTY_STATE;
+  }
+}
+
+export function saveLearned(state: LearnedState): void {
+  ensureDirs();
+  const tmp = new File(root, 'learned.json.tmp');
+  if (tmp.exists) tmp.delete();
+  tmp.create();
+  tmp.write(serializeLearnedState(state));
+  tmp.moveSync(new File(root, 'learned.json'), { overwrite: true });
 }
 
 // The switches of the Learned section

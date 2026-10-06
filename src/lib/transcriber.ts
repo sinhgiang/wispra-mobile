@@ -4,8 +4,9 @@ import { currentSession, validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
 import type { Entry } from './entries';
 import { applyReplacements, buildSttPrompt, selectTerms, STT_PROMPT_MAX_TERMS } from './lexicon';
-import { loadLearning, loadLexicon, loadTranscribeLanguage, loadVocabulary } from './storage';
+import { loadLearned, loadLearning, loadLexicon, loadTranscribeLanguage, loadVocabulary } from './storage';
 import { dropTermListEcho, spellVocabulary } from './vocabulary';
+import { noteKeyboardLog } from '@/modules/wispra-keyboard-bridge';
 import { emptyAudio, NO_AUDIO, NO_SPEECH } from './transcribe-queue';
 import { withChosenLanguage } from './transcribe-language';
 import { readAnswer, type ReadAnswer, type VerboseTranscript } from './transcript-filter';
@@ -122,8 +123,20 @@ export async function transcribeAudio(uri: string | null, durationMs: number, op
   if (!uri) return { ok: false, error: 'The audio file is not on this phone.' };
   const chosen = withChosenLanguage(options, loadTranscribeLanguage());
   const prompt = 'prompt' in options ? options.prompt : learnedPrompt();
+  const started = Date.now();
   const result = await transcribeFile(new File(uri), durationMs, validToken, prompt ? { ...chosen, prompt } : chosen);
+  // For the keyboard log: whether the terms were sent and how Whisper's answer came back, never the words. This
+  // is how the effect of the prompt on the real service is read from the phone.
+  note(`transcribe: ${prompt ? `prompt of ${prompt.split(', ').length} terms sent` : 'no prompt'}, ${result.ok ? 'text came back' : 'no text'} in ${Date.now() - started} ms`);
   return withLearnedWords(result);
+}
+
+function note(text: string): void {
+  try {
+    noteKeyboardLog(text);
+  } catch {
+    // The log is only for finding out what went wrong
+  }
 }
 
 // What Whisper is told to listen for: the Custom vocabulary, then the words learned from fixes. With
@@ -131,7 +144,12 @@ export async function transcribeAudio(uri: string | null, durationMs: number, op
 export function learnedPrompt(): string | undefined {
   try {
     const vocabulary = loadVocabulary();
-    const terms = loadLearning().learning ? selectTerms(vocabulary, loadLexicon(), STT_PROMPT_MAX_TERMS) : vocabulary.slice(0, STT_PROMPT_MAX_TERMS);
+    const learning = loadLearning();
+    // With learning on: the vocabulary, the words learned from fixes, and (when "Learn my vocabulary from
+    // History" is on) the words picked up from History, which only fill the room that is left
+    const terms = learning.learning
+      ? selectTerms(vocabulary, loadLexicon(), STT_PROMPT_MAX_TERMS, learning.autoLearn ? loadLearned().autoTerms : [])
+      : vocabulary.slice(0, STT_PROMPT_MAX_TERMS);
     return buildSttPrompt(terms);
   } catch {
     return undefined;
@@ -191,6 +209,7 @@ export async function transcribeFile(
 function withoutEcho(result: TranscribeResult, prompt: string | undefined): TranscribeResult {
   if (!result.ok || !prompt) return result;
   const text = dropTermListEcho(result.text, prompt);
+  if (text !== result.text) note('transcribe: part of the answer was only the prompt echoed back: dropped');
   return text ? { ...result, text } : { ok: false, error: NO_SPEECH };
 }
 
