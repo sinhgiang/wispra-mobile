@@ -9,6 +9,7 @@ const mockHeard: Record<string, string> = {};
 const mockChat: { user: string }[] = [];
 let mockChatAnswer: (user: string) => unknown = () => ({ text: '' });
 const mockListeners: ((chunk: unknown) => void)[] = [];
+const mockNotes: string[] = [];
 const mockDelivered: { utterance: string; index: number; text: string; last: boolean; failed: boolean }[] = [];
 
 jest.mock('expo-file-system', () => ({ File: class { exists = false; constructor(_uri: string) {} delete() {} } }));
@@ -17,6 +18,9 @@ jest.mock('@/lib/entries-store', () => ({ useEntries: () => ({ cloudAllowed: () 
 jest.mock('@/lib/transcriber', () => ({
   transcribeAudio: async (path: string) => ({ ok: true, text: mockHeard[path] ?? '' }),
 }));
+// The step waits 50 ms here instead of 4 s; the real value is checked in punctuation.test.ts
+jest.mock('@/lib/punctuation', () => ({ ...(jest.requireActual('@/lib/punctuation') as object), PUNCTUATION_WAIT_MS: 50 }));
+jest.mock('@/lib/use-session', () => ({ useSession: () => null }));
 jest.mock('@/lib/ai', () => ({
   chatJson: async (_system: string, user: string) => {
     mockChat.push({ user });
@@ -32,6 +36,7 @@ jest.mock('@/modules/wispra-keyboard-bridge', () => ({
     mockDelivered.push({ utterance, index, text, last, failed });
     return true;
   },
+  noteKeyboardLog: (text: string) => mockNotes.push(text),
 }));
 
 // eslint-disable-next-line import/first
@@ -46,6 +51,7 @@ beforeEach(() => {
   mockChat.length = 0;
   mockListeners.length = 0;
   mockDelivered.length = 0;
+  mockNotes.length = 0;
   mockChatAnswer = () => ({ text: '' });
 });
 
@@ -94,6 +100,35 @@ describe('the keyboard types punctuated words', () => {
     expect(mockChat).toHaveLength(0);
     // Not transcribed either: nothing to type, but the keyboard still hears that the piece ended
     expect(mockDelivered).toEqual([{ utterance: 'u4', index: 0, text: '', last: true, failed: false }]);
+  });
+
+  it('is never held up by a chat call that does not answer: after the short wait the words are typed as they came, with a capital', async () => {
+    mockHeard['h0.m4a'] = 'xin chào cả nhà hôm nay mình họp';
+    mockHeard['h1.m4a'] = 'sau đó mình gửi báo cáo cho anh Nam';
+    // Never answers (the real call would give up only after 90 s)
+    mockChatAnswer = () => new Promise(() => undefined);
+    await render(<KeyboardSessionBridge />);
+    mockListeners[0](piece('h0.m4a', 'u6', 0, false));
+    mockListeners[0](piece('h1.m4a', 'u6', 1, true));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    // Both pieces came out, in order; the second did not wait for the first one's 90 s
+    expect(mockDelivered.map((d) => [d.index, d.text, d.failed])).toEqual([
+      [0, 'Xin chào cả nhà hôm nay mình họp', false],
+      [1, 'sau đó mình gửi báo cáo cho anh Nam', false],
+    ]);
+    // The log says it ran out of time, and holds none of the words
+    expect(mockNotes.filter((n) => /punctuation: timeout in \d+ ms, \d+ words/.test(n))).toHaveLength(2);
+    expect(mockNotes.join(' ')).not.toMatch(/chào|báo cáo/);
+  });
+
+  it('notes how the step went in the log, without the words', async () => {
+    mockHeard['n.m4a'] = 'ngoài kia Không có sự lắng nghe Cho nên tôi nghĩ';
+    mockChatAnswer = () => ({ text: 'Ngoài kia, không có sự lắng nghe. Cho nên, tôi nghĩ.' });
+    await render(<KeyboardSessionBridge />);
+    mockListeners[0](piece('n.m4a', 'u7', 0, true));
+    await settle();
+    expect(mockNotes).toHaveLength(1);
+    expect(mockNotes[0]).toMatch(/^punctuation: model in \d+ ms, 11 words$/);
   });
 
   it('is never held up by the step: a failing chat call types the words anyway', async () => {

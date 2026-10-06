@@ -37,6 +37,12 @@ public class WispraKeyboardBridgeModule: Module {
       SharedLog.read()
     }.runOnQueue(.main)
 
+    // A line from the app's JavaScript (how the punctuation step went); never the words said
+    AsyncFunction("noteKeyboardLog") { (text: String) -> Bool in
+      SharedLog.append("app", text)
+      return true
+    }.runOnQueue(.main)
+
     AsyncFunction("clearKeyboardLog") { () -> Bool in
       SharedLog.clear()
       return true

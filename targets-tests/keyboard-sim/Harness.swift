@@ -201,9 +201,11 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     }
   }
 
-  static func session(beatAgoMs: Double) -> String {
+  /// engine: what the app says about its microphone (nil: an earlier build, which says nothing)
+  static func session(beatAgoMs: Double, engine: Bool? = nil) -> String {
     let now = Date().timeIntervalSince1970 * 1000
-    return "{\"until\": \(now + 10 * 60 * 1000), \"beat\": \(now - beatAgoMs)}"
+    let engineField = engine.map { ", \"engine\": \($0), \"problem\": \"microphone used by another app\"" } ?? ""
+    return "{\"until\": \(now + 10 * 60 * 1000), \"beat\": \(now - beatAgoMs)\(engineField)}"
   }
 
   /// T-0178: in Messenger and Zalo iOS stopped Wispra, and the keyboard waited for ever ("Đang viết…", or a
@@ -229,6 +231,26 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
         check(labels(in: keyboard.view).contains(KeyboardViewController.appStoppedMessage), "waiting and the app is gone: it says so, not Đang viết… for ever")
         let log = SharedLog.read().joined(separator: "\n")
         check(log.contains("no sign of life"), "and the keyboard noted it in the log")
+        microphoneTakenByAnotherApp(keyboard: keyboard, mic: mic)
+      }
+    }
+  }
+
+  /// T-0178 review: the app runs and beats, but another app (Zalo, Messenger) has the audio, so its engine is
+  /// stopped. The red mic must not stay red recording nothing: after about four seconds it says so.
+  static func microphoneTakenByAnotherApp(keyboard: KeyboardViewController, mic: UIButton?) {
+    SharedChannel.write(.session, session(beatAgoMs: 0, engine: true))
+    mic?.sendActions(for: .touchUpInside)
+    check(mic?.accessibilityLabel == "Listening. Tap to type what you said", "the engine runs: the mic is red")
+    // One check with the engine down is a blip, not reported
+    SharedChannel.write(.session, session(beatAgoMs: 0, engine: false))
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+      check(mic?.accessibilityLabel == "Listening. Tap to type what you said", "one check with the engine down: still red, a blip")
+      SharedChannel.write(.session, session(beatAgoMs: 0, engine: false))
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+        check(mic?.accessibilityLabel == "Speak with Wispra", "the engine stays down: the mic does not stay red")
+        check(labels(in: keyboard.view).contains(KeyboardViewController.micBusyMessage), "and it says the microphone is taken")
+        check(SharedLog.read().joined(separator: "\n").contains("microphone is stopped"), "and the keyboard noted why in the log")
 
         keyboard.beginAppearanceTransition(false, animated: false)
         keyboard.endAppearanceTransition()

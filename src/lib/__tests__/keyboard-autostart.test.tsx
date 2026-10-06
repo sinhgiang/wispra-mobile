@@ -14,6 +14,7 @@ const mockStarted: number[] = [];
 
 jest.mock('expo-file-system', () => ({ File: class { exists = false; constructor(_uri: string) {} delete() {} } }));
 jest.mock('@/lib/entries-store', () => ({ useEntries: () => ({ cloudAllowed: () => mockAllowed }) }));
+jest.mock('@/lib/use-session', () => ({ useSession: () => null }));
 jest.mock('@/lib/storage', () => ({ loadSessionMinutes: () => 240, sessionEndedByUser: () => mockEnded }));
 jest.mock('@/lib/transcriber', () => ({ transcribeAudio: async () => ({ ok: true, text: '' }) }));
 jest.mock('@/lib/ai', () => ({ chatJson: async () => ({}) }));
@@ -39,6 +40,29 @@ beforeEach(() => {
   mockActive = false;
   mockEnded = false;
   mockStarted.length = 0;
+});
+
+describe('a cold start (T-0178 review)', () => {
+  // Wispra is opened from nothing: the sign-in and the data on the phone are not loaded yet, and AppState
+  // sends no "active" for the state the app starts in. The session starts when they are.
+  it('starts once Wispra Cloud may be used, when it may not be at the first render', async () => {
+    mockAllowed = false;
+    const view = await render(<KeyboardSessionBridge />);
+    await settle();
+    expect(mockStarted).toEqual([]);
+    mockAllowed = true;
+    await view.rerender(<KeyboardSessionBridge />);
+    await settle();
+    expect(mockStarted).toEqual([240]);
+  });
+
+  it('starts once, not twice, when it may be used from the first render', async () => {
+    const view = await render(<KeyboardSessionBridge />);
+    await settle();
+    await view.rerender(<KeyboardSessionBridge />);
+    await settle();
+    expect(mockStarted).toEqual([240]);
+  });
 });
 
 describe('the session starts by itself when Wispra is opened', () => {

@@ -40,6 +40,7 @@ interface NativeKeyboardBridge {
   sessionState(): Promise<SessionState>;
   keyboardLog(): Promise<string[]>;
   clearKeyboardLog(): Promise<boolean>;
+  noteKeyboardLog(text: string): Promise<boolean>;
   deliverText(utterance: string, index: number, text: string, last: boolean, failed: boolean): Promise<boolean>;
   addListener(event: 'onChunk', listener: (chunk: SessionChunk) => void): Subscription;
   addListener(event: 'onSession', listener: (state: SessionState) => void): Subscription;
@@ -91,6 +92,15 @@ export async function endSessionBeforeRecording(): Promise<void> {
 // What the app and the keyboard noted about the listening session, oldest first
 export async function keyboardLog(): Promise<string[]> {
   return native ? native.keyboardLog() : [];
+}
+
+// A line in the keyboard log from JavaScript; it must never hold the words said. Never fails the caller.
+export function noteKeyboardLog(text: string): void {
+  try {
+    void native?.noteKeyboardLog(text).catch(() => undefined);
+  } catch {
+    // The log is only for finding out what went wrong
+  }
 }
 
 export async function clearKeyboardLog(): Promise<void> {

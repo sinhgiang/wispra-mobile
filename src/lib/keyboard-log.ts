@@ -11,15 +11,19 @@ export interface LogFinding {
   meaning: string;
 }
 
-// Signs, from the most telling down: what iOS did to Wispra, then what the keyboard saw
+// Lines that point at a problem. The page shows the NEWEST such line (not the most telling one). A line that
+// is part of normal use (a session is not running, so the keyboard opens Wispra) is not a sign.
 const SIGNS: { match: RegExp; meaning: string }[] = [
+  // The app cannot tell these two apart when it starts again
+  { match: /iOS closed Wispra, or it was closed by hand/i, meaning: 'Wispra ended while its session was on: iOS closed it (usually to free memory when a big app opens), or you closed it yourself. If you did not, the keyboard had no app to answer it.' },
   { match: /iOS closed Wispra/i, meaning: 'iOS closed Wispra while its session was on (usually to free memory when a big app opens). The keyboard then has no app to answer it.' },
   { match: /the app was not running for \d+ s \(suspended/i, meaning: 'iOS suspended Wispra for a while: it did not run, so it could not hear or answer.' },
   { match: /no sign of life/i, meaning: 'The keyboard saw Wispra stop giving signs of life: iOS had stopped it.' },
   { match: /interrupted by another app or iOS/i, meaning: 'Another app (or iOS) took the microphone from Wispra.' },
   { match: /could not start the microphone again/i, meaning: 'Wispra could not take the microphone back: it is busy with another app.' },
   { match: /memory is short/i, meaning: 'iOS warned that memory is short: it may close Wispra when a big app opens.' },
-  { match: /no live session/i, meaning: 'The keyboard found no running session, so it asked Wispra to open.' },
+  { match: /microphone is stopped/i, meaning: 'Wispra runs but another app has the microphone, so nothing was being recorded. The keyboard said so.' },
+  { match: /punctuation: timeout/i, meaning: 'The punctuation step did not answer in a few seconds: the words were typed without full stops and commas.' },
   { match: /no words after \d+ s/i, meaning: 'The words did not come back in time.' },
 ];
 
