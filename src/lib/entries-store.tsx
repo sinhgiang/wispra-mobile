@@ -42,6 +42,7 @@ import {
   deleteAudio,
   loadEntries,
   loadHidden,
+  loadLearning,
   loadLexicon,
   loadDataOwner,
   loadDeletionBook,
@@ -106,7 +107,8 @@ interface EntriesApi {
   chooseAccount(choice: AccountChoice, shownIds: readonly string[]): ChoiceResult;
 }
 
-export type FixResult = { ok: true; learned: WordPair[] } | { ok: false; error: string };
+// learning: the "Learn my words" switch was on, so what the fix teaches was kept (T-0182)
+export type FixResult = { ok: true; learned: WordPair[]; learning: boolean } | { ok: false; error: string };
 
 export interface SyncState {
   at: string | null;
@@ -416,8 +418,11 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       if (!text.trim()) return { ok: false, error: 'The text cannot be empty.' };
       const fixed = fixText(entry, text);
       // The same words: saved as they are, nothing to learn
-      if (!fixed) return { ok: true, learned: [] };
+      const learningOn = loadLearning().learning;
+      if (!fixed) return { ok: true, learned: [], learning: learningOn };
       commit(current.current.map((e) => (e.id === id ? fixed.entry : e)));
+      // The fix is saved either way; with "Learn my words" off nothing is learned from it
+      if (!learningOn) return { ok: true, learned: [], learning: false };
       const now = new Date().toISOString();
       const known = loadLexicon();
       const learning = learnFromFix(known, fixed.before, fixed.entry.text ?? '', now, newId);
@@ -429,7 +434,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
           return { ok: false, error: 'The text was saved, but what it teaches could not be.' };
         }
       }
-      return { ok: true, learned: learning.learned };
+      return { ok: true, learned: learning.learned, learning: true };
     },
     [commit],
   );

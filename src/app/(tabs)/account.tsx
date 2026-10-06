@@ -191,6 +191,19 @@ function TranscriptionLanguage() {
             <Text style={styles.chevron}>›</Text>
           </View>
         </Pressable>
+        {/* The words Wispra spells your way (T-0182), as on the computer: Custom vocabulary and Learned */}
+        <Pressable accessibilityRole="button" accessibilityLabel="Custom vocabulary: names and terms to spell exactly" onPress={() => router.push('/vocabulary')} style={styles.row}>
+          <Text style={styles.rowLabel}>Custom vocabulary</Text>
+          <View style={styles.rowEnd}>
+            <Text style={styles.chevron}>›</Text>
+          </View>
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Learned: the words Wispra learned from your fixes" onPress={() => router.push('/learned')} style={styles.row}>
+          <Text style={styles.rowLabel}>Learned</Text>
+          <View style={styles.rowEnd}>
+            <Text style={styles.chevron}>›</Text>
+          </View>
+        </Pressable>
       </View>
     </View>
   );

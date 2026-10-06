@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { fixText, type Entry } from '../entries';
 import {
+  addManualEntry,
   applyReplacements,
   extractCorrections,
   learnFromFix,
@@ -9,9 +10,13 @@ import {
   learnPair,
   lexiconMode,
   MAX_LEXICON_ENTRIES,
+  MODE_LABEL,
+  MODE_TITLE,
   normKey,
   parseLexicon,
+  removeEntry,
   serializeLexicon,
+  updateEntry,
   words,
   type LexiconEntry,
 } from '../lexicon';
@@ -181,5 +186,65 @@ describe('the note and the saved file', () => {
       expect.objectContaining({ id: 'y', term: 'Ok', heardAs: ['o'], count: 1, enabled: true, source: 'correction' }),
     ]);
     expect(normKey('  Việt   NAM ')).toBe('việt nam');
+  });
+});
+
+describe('the Learned section’s list (T-0182, as on the computer)', () => {
+  const add = (list: LexiconEntry[], term: string, forms: string[]) => addManualEntry(list, term, forms, NOW, makeId);
+
+  it('adds a typed term that replaces its wrong forms at once', () => {
+    const { entries, entry } = add([], '  Claude   Code ', ['Cloud Code', ' Clod Code', 'claude code', 'Cloud Code']);
+    expect(entry).toMatchObject({ term: 'Claude Code', heardAs: ['Cloud Code', 'Clod Code'], source: 'manual', count: 1, enabled: true, pinned: false });
+    expect(lexiconMode(entry!)).toBe('replace');
+    expect(applyReplacements('dùng Cloud Code và clod code', entries)).toBe('dùng Claude Code và Claude Code');
+  });
+
+  it('a term with no wrong form is a spelling', () => {
+    expect(lexiconMode(add([], 'TikTok', []).entry!)).toBe('spelling');
+  });
+
+  it('refuses an empty term and one over 80 characters, and cuts the forms at 10 and 80 characters', () => {
+    expect(add([], '   ', ['x']).entry).toBeNull();
+    expect(add([], 'x'.repeat(81), []).entry).toBeNull();
+    const forms = Array.from({ length: 15 }, (_, i) => `sai ${i}`);
+    expect(add([], 'Đúng', forms).entry?.heardAs).toHaveLength(10);
+    expect(add([], 'Đúng', ['y'.repeat(81)]).entry?.heardAs).toEqual([]);
+  });
+
+  it('adding the same term again keeps one entry, gives it the new forms, and counts one more', () => {
+    const first = add([], 'Claude', ['Cloud']).entries;
+    const second = add(first, 'claude', ['Clod']);
+    expect(second.entries).toHaveLength(1);
+    expect(second.entries[0]).toMatchObject({ term: 'claude', heardAs: ['Cloud', 'Clod'], count: 2, source: 'manual' });
+  });
+
+  it('a wrong form belongs to one entry: the newest claim wins', () => {
+    const first = add([], 'Claude', ['Cloud']).entries;
+    const second = add(first, 'Clod', ['Cloud']).entries;
+    // The one typed in by hand stays, now only a spelling; one learned from a fix would be dropped
+    expect(second.find((e) => e.term === 'Claude')?.heardAs).toEqual([]);
+    expect(second.find((e) => e.term === 'Clod')?.heardAs).toEqual(['Cloud']);
+  });
+
+  it('Pin, Turn off and removing a heard-as form change only that entry, and a form can only be removed', () => {
+    const list = add([], 'Claude', ['Cloud', 'Clod']).entries;
+    const id = list[0].id;
+    expect(updateEntry(list, id, { pinned: true })[0].pinned).toBe(true);
+    expect(lexiconMode(updateEntry(list, id, { enabled: false })[0])).toBe('off');
+    expect(updateEntry(list, id, { heardAs: ['Clod'] })[0].heardAs).toEqual(['Clod']);
+    // Cannot add a form through an update
+    expect(updateEntry(list, id, { heardAs: ['Cloud', 'Clod', 'New'] })[0].heardAs).toEqual(['Cloud', 'Clod']);
+    expect(updateEntry(list, 'nope', { pinned: true })).toBe(list);
+    expect(list[0].pinned).toBe(false);
+  });
+
+  it('Delete removes the entry', () => {
+    const list = add(add([], 'A', ['x']).entries, 'B', ['y']).entries;
+    expect(removeEntry(list, list[0].id).map((e) => e.term)).toEqual(['B']);
+  });
+
+  it('the modes have the computer’s words', () => {
+    expect(MODE_LABEL).toEqual({ replace: 'Always replace', hint: 'Hint only', spelling: 'Spelling', off: 'Off' });
+    expect(MODE_TITLE.replace).toBe('Wispra swaps the wrong forms for this term automatically.');
   });
 });

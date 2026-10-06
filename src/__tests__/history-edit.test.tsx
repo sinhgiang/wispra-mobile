@@ -10,6 +10,7 @@ import type { LexiconEntry } from '@/lib/lexicon';
 
 let mockEntries: Entry[] = [];
 let mockLexicon: LexiconEntry[] = [];
+let mockLearning = true;
 const mockCopied: string[] = [];
 const mockBack = jest.fn();
 const mockPush = jest.fn();
@@ -51,6 +52,8 @@ jest.mock('@/lib/storage', () => ({
     mockLexicon = JSON.parse(JSON.stringify(list));
   },
   loadTranscribeLanguage: () => 'vi',
+  loadVocabulary: () => [],
+  loadLearning: () => ({ learning: mockLearning, autoLearn: true }),
   loadEntries: () => mockEntries,
   saveEntries: (list: Entry[]) => {
     mockEntries = list;
@@ -117,6 +120,7 @@ async function open(e: Entry, ...others: Entry[]) {
 const LONG = 'Hôm nay tôi dùng Cloud Code để viết một bản báo cáo khá dài về cuộc họp sáng nay, rồi gửi cho cả nhóm xem trước giờ trưa.';
 
 beforeEach(() => {
+  mockLearning = true;
   mockEntries = [];
   mockLexicon = [];
   mockCopied.length = 0;
@@ -221,6 +225,19 @@ describe('editing', () => {
   it('an entry that is gone cannot be fixed', async () => {
     await open(entry(LONG));
     expect(api?.fixEntry('nope', 'x')).toEqual({ ok: false, error: 'That entry no longer exists.' });
+  });
+});
+
+describe('with Learn my words off', () => {
+  it('saves the fix, learns nothing, and says so', async () => {
+    mockLearning = false;
+    await open(entry(LONG));
+    await fireEvent.press(screen.getByText('Edit'));
+    await fireEvent.changeText(screen.getByLabelText('Text of this dictation'), LONG.replace('Cloud', 'Claude'));
+    await fireEvent.press(screen.getByText('Save'));
+    expect(await screen.findByText('Saved. Learning is off, so nothing was learned.')).toBeTruthy();
+    expect(mockEntries[0].text).toBe(LONG.replace('Cloud', 'Claude'));
+    expect(mockLexicon).toEqual([]);
   });
 });
 

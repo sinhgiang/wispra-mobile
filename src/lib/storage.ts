@@ -6,7 +6,9 @@ import { parseSessionMinutes } from './keyboard-session';
 import { parseTranscribeLanguage, type TranscribeLanguage } from './transcribe-language';
 import { freeName } from './transcribe-queue';
 import { parseDeletionBook, serializeDeletionBook, type DeletionBook } from './history-delete';
+import { parseLearning, serializeLearning, type LearningSettings, DEFAULT_LEARNING } from './learning';
 import { parseLexicon, serializeLexicon, type LexiconEntry } from './lexicon';
+import { parseVocabulary } from './vocabulary';
 
 // Everything lives in the app's document directory, which the system never clears on its own
 // (unlike the cache directory).
@@ -92,6 +94,44 @@ export function saveLexicon(entries: LexiconEntry[]): void {
   tmp.create();
   tmp.write(serializeLexicon(entries));
   tmp.moveSync(new File(root, 'lexicon.json'), { overwrite: true });
+}
+
+// The Custom vocabulary: names and terms to spell exactly (see vocabulary.ts)
+export function loadVocabulary(): string[] {
+  try {
+    const file = new File(root, 'vocabulary.json');
+    return file.exists ? parseVocabulary(file.textSync()) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveVocabulary(terms: string[]): void {
+  ensureDirs();
+  const tmp = new File(root, 'vocabulary.json.tmp');
+  if (tmp.exists) tmp.delete();
+  tmp.create();
+  tmp.write(JSON.stringify(terms));
+  tmp.moveSync(new File(root, 'vocabulary.json'), { overwrite: true });
+}
+
+// The switches of the Learned section
+export function loadLearning(): LearningSettings {
+  try {
+    const file = new File(root, 'learning.json');
+    return file.exists ? parseLearning(file.textSync()) : DEFAULT_LEARNING;
+  } catch {
+    return DEFAULT_LEARNING;
+  }
+}
+
+export function saveLearning(settings: LearningSettings): void {
+  ensureDirs();
+  const tmp = new File(root, 'learning.json.tmp');
+  if (tmp.exists) tmp.delete();
+  tmp.create();
+  tmp.write(serializeLearning(settings));
+  tmp.moveSync(new File(root, 'learning.json'), { overwrite: true });
 }
 
 // Deletions Wispra Cloud has not confirmed yet, and the time of the last list of deletions read

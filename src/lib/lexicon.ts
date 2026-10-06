@@ -254,14 +254,15 @@ export function applyReplacements(text: string, entries: LexiconEntry[]): string
 }
 
 // What History says under an edited text, as the computer words it
-export function learnNote(learned: WordPair[]): string {
+export function learnNote(learned: WordPair[], learning = true): string {
+  if (!learning) return 'Saved. Learning is off, so nothing was learned.';
   if (learned.length === 0) return 'Saved. No word corrections detected.';
   const shown = learned
     .slice(0, 3)
     .map((p) => `“${p.heardAs}” → “${p.term}”`)
     .join(', ');
   const more = learned.length > 3 ? ` and ${learned.length - 3} more` : '';
-  return `Learned: ${shown}${more}. Fix it once more and it is replaced by itself.`;
+  return `Learned: ${shown}${more}. Manage in the Learned tab.`;
 }
 
 // The saved file: unknown or broken rows are skipped, like the history file
@@ -294,4 +295,134 @@ export function parseLexicon(json: string): LexiconEntry[] {
 
 export function serializeLexicon(entries: LexiconEntry[]): string {
   return JSON.stringify(entries);
+}
+
+// ── The Learned section (T-0182): the same list, rules and words as the computer's Learned tab ──
+export const MAX_MANUAL_CHARS = 80;
+export const MAX_MANUAL_VARIANTS = 10;
+export const STT_PROMPT_MAX_TERMS = 20;
+export const LLM_PROMPT_MAX_TERMS = 40;
+
+// How an entry is shown, as on the computer
+export const MODE_LABEL = { replace: 'Always replace', hint: 'Hint only', spelling: 'Spelling', off: 'Off' } as const;
+export const MODE_TITLE = {
+  replace: 'Wispra swaps the wrong forms for this term automatically.',
+  hint: 'Learned from one fix. The AI cleanup only applies it when the sentence clearly means this term. Fix it once more, or pin it, to always replace.',
+  spelling: 'No wrong forms — Wispra just keeps this term spelled this way.',
+  off: 'Switched off — ignored until you turn it back on.',
+} as const;
+
+function cleanSpaces(s: string): string {
+  return s.normalize('NFC').replace(/\s+/g, ' ').trim();
+}
+
+// A term typed in by the person (the Add a term form, or Keep on a suggestion): replaces its wrong forms
+// right away. An existing entry for the same term gets the new forms and counts one more.
+export function addManualEntry(
+  current: LexiconEntry[],
+  term: string,
+  variants: string[],
+  now: string,
+  makeId: () => string,
+): { entries: LexiconEntry[]; entry: LexiconEntry | null } {
+  const cleanTerm = cleanSpaces(term);
+  if (!cleanTerm || cleanTerm.length > MAX_MANUAL_CHARS) return { entries: current, entry: null };
+  const termKey = normKey(cleanTerm);
+  const forms: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of variants) {
+    const v = cleanSpaces(raw);
+    if (!v || v.length > MAX_MANUAL_CHARS || normKey(v) === termKey || seen.has(normKey(v))) continue;
+    seen.add(normKey(v));
+    forms.push(v);
+    if (forms.length >= MAX_MANUAL_VARIANTS) break;
+  }
+  let list = clone(current);
+  const existing = list.find((e) => normKey(e.term) === termKey) ?? null;
+  if (existing) {
+    for (const form of forms) {
+      list = releaseHeardAs(list, form, existing);
+      if (!existing.heardAs.some((h) => normKey(h) === normKey(form))) existing.heardAs.push(form);
+    }
+    existing.term = cleanTerm;
+    existing.count += 1;
+    existing.lastSeen = now;
+    // Typed in by the person: explicitly wanted
+    existing.source = 'manual';
+    return { entries: list, entry: existing };
+  }
+  for (const form of forms) list = releaseHeardAs(list, form, null);
+  const entry: LexiconEntry = {
+    id: makeId(),
+    term: cleanTerm,
+    heardAs: forms,
+    count: 1,
+    enabled: true,
+    pinned: false,
+    source: 'manual',
+    createdAt: now,
+    lastSeen: now,
+  };
+  list.push(entry);
+  return { entries: cap(list), entry };
+}
+
+export interface LexiconPatch {
+  enabled?: boolean;
+  pinned?: boolean;
+  // Can only shrink: the forms to keep
+  heardAs?: string[];
+}
+
+export function updateEntry(current: LexiconEntry[], id: string, patch: LexiconPatch): LexiconEntry[] {
+  const list = clone(current);
+  const entry = list.find((e) => e.id === id);
+  if (!entry) return current;
+  if (typeof patch.enabled === 'boolean') entry.enabled = patch.enabled;
+  if (typeof patch.pinned === 'boolean') entry.pinned = patch.pinned;
+  if (Array.isArray(patch.heardAs)) {
+    const keep = new Set(patch.heardAs.map(normKey));
+    entry.heardAs = entry.heardAs.filter((h) => keep.has(normKey(h)));
+  }
+  return list;
+}
+
+export function removeEntry(current: LexiconEntry[], id: string): LexiconEntry[] {
+  return current.filter((e) => e.id !== id);
+}
+
+function byPriority(a: LexiconEntry, b: LexiconEntry): number {
+  return b.count - a.count || b.lastSeen.localeCompare(a.lastSeen);
+}
+
+// A capital or a digit, or plain ASCII with three letters in a row: looks like a name or a term, not an everyday word
+function termLike(term: string): boolean {
+  return /[\p{Lu}\p{N}]/u.test(term) || (/^[\x20-\x7e]+$/.test(term) && /[A-Za-z]{3}/.test(term));
+}
+
+// The terms the speech recogniser is told to listen for, most useful first: pinned words, the plain
+// vocabulary list, the other words that were confirmed, then what was picked up from History; at most `limit`
+export function selectTerms(manual: string[], entries: LexiconEntry[], limit: number, auto: string[] = []): string[] {
+  const live = entries.filter((e) => e.enabled);
+  const pinned = live.filter((e) => e.pinned).sort(byPriority);
+  const others = live
+    .filter((e) => !e.pinned && (e.source === 'manual' || e.count >= LEXICON_REPLACE_MIN_COUNT || termLike(e.term)))
+    .sort(byPriority);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const term of [...pinned.map((e) => e.term), ...manual, ...others.map((e) => e.term), ...auto]) {
+    const key = normKey(term);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(term);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+// The "prompt" sent with the audio: only the terms, as the computer does (an instruction there gets echoed by
+// Whisper on silence)
+export function buildSttPrompt(terms: string[]): string | undefined {
+  const list = terms.map((t) => t.trim()).filter(Boolean).slice(0, STT_PROMPT_MAX_TERMS);
+  return list.length > 0 ? `${list.join(', ')}.` : undefined;
 }

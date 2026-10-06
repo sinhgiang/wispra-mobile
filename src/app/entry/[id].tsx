@@ -64,7 +64,7 @@ export default function EntryScreen() {
       setNote({ text: result.error, error: true });
       return;
     }
-    setNote({ text: learnNote(result.learned), error: false });
+    setNote({ text: learnNote(result.learned, result.learning), error: false });
     setEditing(false);
   };
   const askDelete = () =>

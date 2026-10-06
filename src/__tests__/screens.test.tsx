@@ -363,6 +363,16 @@ describe("the page the keyboard's mic opens, and the account (T-0182)", () => {
   });
 });
 
+describe('Account › the words (T-0182)', () => {
+  it('has Custom vocabulary and Learned, which open their screens', async () => {
+    await render(<AccountScreen />);
+    await fireEvent.press(screen.getByText('Custom vocabulary'));
+    expect(mockPush).toHaveBeenCalledWith('/vocabulary');
+    await fireEvent.press(screen.getByText('Learned'));
+    expect(mockPush).toHaveBeenCalledWith('/learned');
+  });
+});
+
 describe('the keyboard log (T-0178)', () => {
   it('Account has a Keyboard log row on iPhone, opening the log; none on Android', async () => {
     await render(<AccountScreen />);

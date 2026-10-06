@@ -3,8 +3,9 @@ import { File, UploadType, type UploadOptions, type UploadResult } from 'expo-fi
 import { currentSession, validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
 import type { Entry } from './entries';
-import { applyReplacements } from './lexicon';
-import { loadLexicon, loadTranscribeLanguage } from './storage';
+import { applyReplacements, buildSttPrompt, selectTerms, STT_PROMPT_MAX_TERMS } from './lexicon';
+import { loadLearning, loadLexicon, loadTranscribeLanguage, loadVocabulary } from './storage';
+import { dropTermListEcho, spellVocabulary } from './vocabulary';
 import { emptyAudio, NO_AUDIO, NO_SPEECH } from './transcribe-queue';
 import { withChosenLanguage } from './transcribe-language';
 import { readAnswer, type ReadAnswer, type VerboseTranscript } from './transcript-filter';
@@ -29,6 +30,8 @@ export function transcriptionAvailable(): boolean {
 // Vietnamese (see needsResend); with one already sent, there is nothing more to ask.
 export interface TranscribeOptions {
   language?: string;
+  // The terms Whisper is told to listen for: the Custom vocabulary and learned words (see lexicon.buildSttPrompt)
+  prompt?: string;
 }
 
 // Wispra Cloud's answer, as a result for the card, with what the filters did to it. Pure, so it is
@@ -117,17 +120,34 @@ export async function transcribe(entry: Entry, options: TranscribeOptions = {}):
 // caller says one (an explicit `language` key, even undefined).
 export async function transcribeAudio(uri: string | null, durationMs: number, options: TranscribeOptions = {}): Promise<TranscribeResult> {
   if (!uri) return { ok: false, error: 'The audio file is not on this phone.' };
-  const result = await transcribeFile(new File(uri), durationMs, validToken, withChosenLanguage(options, loadTranscribeLanguage()));
+  const chosen = withChosenLanguage(options, loadTranscribeLanguage());
+  const prompt = 'prompt' in options ? options.prompt : learnedPrompt();
+  const result = await transcribeFile(new File(uri), durationMs, validToken, prompt ? { ...chosen, prompt } : chosen);
   return withLearnedWords(result);
+}
+
+// What Whisper is told to listen for: the Custom vocabulary, then the words learned from fixes. With
+// learning off only the vocabulary list. Never fails the transcription.
+export function learnedPrompt(): string | undefined {
+  try {
+    const vocabulary = loadVocabulary();
+    const terms = loadLearning().learning ? selectTerms(vocabulary, loadLexicon(), STT_PROMPT_MAX_TERMS) : vocabulary.slice(0, STT_PROMPT_MAX_TERMS);
+    return buildSttPrompt(terms);
+  } catch {
+    return undefined;
+  }
 }
 
 // The words the person fixed in History (twice: see lexicon.ts) are written the way they fixed them,
 // after the transcription and before anything else uses the text (T-0179)
 export function withLearnedWords(result: TranscribeResult): TranscribeResult {
   if (!result.ok) return result;
-  // The words are the person's own; if they cannot be read, the transcription is still theirs to keep
+  // The words are the person's own; if they cannot be read, the transcription is still theirs to keep.
+  // The order is the computer's: the words learned from fixes first (only while learning is on), then the
+  // Custom vocabulary's spelling.
   try {
-    return { ...result, text: applyReplacements(result.text, loadLexicon()) };
+    const learned = loadLearning().learning ? applyReplacements(result.text, loadLexicon()) : result.text;
+    return { ...result, text: spellVocabulary(learned, loadVocabulary()) };
   } catch {
     return result;
   }
@@ -156,15 +176,22 @@ export async function transcribeFile(
   const bearer = await token();
   if (!bearer) return { ok: false, error: 'Sign in to Wispra Cloud in Account to transcribe. The audio is kept on this phone.', transient: true };
 
-  const first = await sendOnce(audio, durationMs, bearer, options.language);
+  const first = await sendOnce(audio, durationMs, bearer, options.language, true, options.prompt);
   if ('error' in first) return first.error;
   // Real speech lost to the filters: once more, asking for Vietnamese; the answer with more words wins
   if (!options.language && needsResend(first.analysed.answer)) {
     // Not counted toward the monthly minutes a second time: no duration header
-    const again = await sendOnce(audio, durationMs, bearer, 'vi', false);
-    if (!('error' in again)) return betterOf(first.analysed, again.analysed).result;
+    const again = await sendOnce(audio, durationMs, bearer, 'vi', false, options.prompt);
+    if (!('error' in again)) return withoutEcho(betterOf(first.analysed, again.analysed).result, options.prompt);
   }
-  return first.analysed.result;
+  return withoutEcho(first.analysed.result, options.prompt);
+}
+
+// With a prompt of terms, near-silence can come back as the terms themselves: that is no speech
+function withoutEcho(result: TranscribeResult, prompt: string | undefined): TranscribeResult {
+  if (!result.ok || !prompt) return result;
+  const text = dropTermListEcho(result.text, prompt);
+  return text ? { ...result, text } : { ok: false, error: NO_SPEECH };
 }
 
 // One upload and the answer read; or why it did not get there
@@ -174,6 +201,7 @@ async function sendOnce(
   bearer: string,
   language: string | undefined,
   countMinutes = true,
+  prompt?: string,
 ): Promise<{ analysed: Analysed } | { error: TranscribeResult }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -184,7 +212,7 @@ async function sendOnce(
       uploadType: UploadType.MULTIPART,
       fieldName: 'file',
       mimeType: 'audio/mp4',
-      parameters: { model: MODEL, response_format: 'verbose_json', ...(language ? { language } : {}) },
+      parameters: { model: MODEL, response_format: 'verbose_json', ...(language ? { language } : {}), ...(prompt ? { prompt } : {}) },
       headers: {
         Authorization: `Bearer ${bearer}`,
         // The server counts this toward the monthly minutes

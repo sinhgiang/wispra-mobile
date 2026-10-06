@@ -85,6 +85,8 @@ export default function RootLayout() {
           <Stack.Screen name="meeting/record" options={{ gestureEnabled: false }} />
           <Stack.Screen name="meeting/[id]" />
           <Stack.Screen name="entry/[id]" />
+          <Stack.Screen name="vocabulary" />
+          <Stack.Screen name="learned" />
           <Stack.Screen name="account-switch" options={{ gestureEnabled: false }} />
           <Stack.Screen name="welcome" />
           <Stack.Screen name="keyboard-session" />
