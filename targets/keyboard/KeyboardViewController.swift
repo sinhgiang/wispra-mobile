@@ -457,6 +457,7 @@ final class KeyboardViewController: UIInputViewController {
       SharedLog.append("keyboard", "purple mic tapped: session live (beat \(beatAgeText()) ago, \(SessionStatus.minutesLeft(untilMs: session.until, nowMs: nowMs())) min left): start")
       post("start")
       listening = true
+      engineDownChecks = 0
       waitingSince = nil
       watchWhileListening()
       // A new utterance: whatever the last one still waited for is over
@@ -498,6 +499,9 @@ final class KeyboardViewController: UIInputViewController {
   }
 
   static let appStoppedMessage = "Wispra đã bị iPhone dừng, chữ chưa tới. Mở Wispra rồi nói lại"
+  static let micBusyMessage = "Wispra chưa lấy lại được micro (app khác đang dùng). Bấm mic lại sau giây lát"
+  /// Checks in a row (every 2 s) that found the app's microphone stopped
+  private var engineDownChecks = 0
 
   /// The mic is red but the app is gone: back to purple, and say so
   private func stopListeningBecauseAppStopped() {
@@ -507,6 +511,17 @@ final class KeyboardViewController: UIInputViewController {
     waitingSince = nil
     paintMic()
     showProblem(Self.appStoppedMessage)
+  }
+
+  /// The mic is red but the app cannot get the microphone: nothing is being recorded. Back to purple, and say so.
+  private func stopListeningBecauseMicBusy() {
+    post("cancel")
+    listening = false
+    listenTimer?.invalidate()
+    waitingForWords = false
+    waitingSince = nil
+    paintMic()
+    showProblem(Self.micBusyMessage)
   }
 
   private func showProblem(_ text: String) {
@@ -522,10 +537,19 @@ final class KeyboardViewController: UIInputViewController {
         timer.invalidate()
         return
       }
-      if WordsWait.appStopped(beatAgeMs: self.beatAgeMs()) {
+      let reading = self.readSession()
+      self.engineDownChecks = MicCheck.nextDownChecks(engine: reading?.engine, current: self.engineDownChecks)
+      switch MicCheck.result(beatAgeMs: self.beatAgeMs(), engine: reading?.engine, downChecks: self.engineDownChecks) {
+      case .appStopped:
         SharedLog.append("keyboard", "listening, but the app gave no sign of life for \(self.beatAgeText()): iOS stopped Wispra?")
         timer.invalidate()
         self.stopListeningBecauseAppStopped()
+      case .micBusy:
+        SharedLog.append("keyboard", "listening, but the app's microphone is stopped (\(reading?.problem ?? "no reason given")): not recording")
+        timer.invalidate()
+        self.stopListeningBecauseMicBusy()
+      case .fine:
+        break
       }
     }
   }
@@ -578,14 +602,15 @@ final class KeyboardViewController: UIInputViewController {
 
   /// The session's status: from the shared keychain, which Wispra writes in the background too;
   /// the pasteboard only while Wispra was open (earlier builds)
-  private func readSession() -> (until: Double, beat: Double)? {
+  private func readSession() -> (until: Double, beat: Double, engine: Bool?, problem: String?)? {
     guard hasFullAccess else { return nil }
     let sources = [SharedChannel.read(.session), UIPasteboard(name: Self.sessionPasteboardName, create: false)?.string]
-    let found = sources.compactMap { text -> (until: Double, beat: Double)? in
+    let found = sources.compactMap { text -> (until: Double, beat: Double, engine: Bool?, problem: String?)? in
       guard let data = text?.data(using: .utf8),
             let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let until = status["until"] as? Double, let beat = status["beat"] as? Double else { return nil }
-      return (until, beat)
+      // engine: whether the app's microphone runs; problem: why not (earlier builds write neither)
+      return (until, beat, status["engine"] as? Bool, status["problem"] as? String)
     }
     // The freshest beat wins
     return found.max { $0.beat < $1.beat }

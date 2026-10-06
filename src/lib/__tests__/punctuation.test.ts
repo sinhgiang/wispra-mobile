@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
   capitalizeStart,
@@ -6,8 +6,10 @@ import {
   needsPunctuation,
   PUNCTUATION_PROMPT,
   punctuate,
+  PUNCTUATION_WAIT_MS,
   sameWords,
   tailOf,
+  withDeadline,
   wordKeys,
 } from '../punctuation';
 
@@ -115,5 +117,45 @@ describe('punctuating a piece', () => {
     expect(await punctuate(counting, 'đã chuẩn rồi, thưa anh. Em đi nhé.', 'Xong rồi.')).toEqual({ text: 'Đã chuẩn rồi, thưa anh. Em đi nhé.', source: 'rules' });
     expect(await punctuate(counting, '', '')).toEqual({ text: '', source: 'original' });
     expect(calls).toBe(0);
+  });
+});
+
+describe('the wait for the model (T-0178 review)', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('is a few seconds, well under the 45 s the keyboard waits for words and the 90 s of the chat call', () => {
+    expect(PUNCTUATION_WAIT_MS).toBeGreaterThanOrEqual(2000);
+    expect(PUNCTUATION_WAIT_MS).toBeLessThanOrEqual(5000);
+  });
+
+  it('gives the answer when it comes in time', async () => {
+    jest.useFakeTimers();
+    const result = withDeadline(Promise.resolve('answer'), 4000, () => 'late');
+    await expect(result).resolves.toBe('answer');
+  });
+
+  it('gives the fallback when the work does not answer, at the deadline and not before', async () => {
+    jest.useFakeTimers();
+    let done = false;
+    const result = withDeadline(new Promise<string>(() => undefined), 4000, () => 'as heard').then((v) => {
+      done = true;
+      return v;
+    });
+    await jest.advanceTimersByTimeAsync(3999);
+    expect(done).toBe(false);
+    await jest.advanceTimersByTimeAsync(2);
+    await expect(result).resolves.toBe('as heard');
+  });
+
+  it('gives the fallback when the work fails, and ignores an answer that comes after the deadline', async () => {
+    jest.useFakeTimers();
+    await expect(withDeadline(Promise.reject(new Error('offline')), 4000, () => 'as heard')).resolves.toBe('as heard');
+    let finish: (v: string) => void = () => undefined;
+    const slow = withDeadline(new Promise<string>((resolve) => (finish = resolve)), 100, () => 'as heard');
+    await jest.advanceTimersByTimeAsync(101);
+    finish('too late');
+    await expect(slow).resolves.toBe('as heard');
   });
 });

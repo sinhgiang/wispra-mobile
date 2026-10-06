@@ -145,6 +145,9 @@ enum SharedLog {
     return json
   }
 
+  /// Reads the whole list, adds a line and writes it back. The app and the keyboard are two processes (and the
+  /// app has several threads), so two lines written at the same moment can lose one: acceptable for a log
+  /// whose lines are minutes apart.
   static func append(_ source: String, _ text: String) {
     let lines = appended(to: parse(SharedChannel.read(.log)), line(source, text))
     SharedChannel.write(.log, serialize(lines))

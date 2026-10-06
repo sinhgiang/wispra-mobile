@@ -75,7 +75,29 @@ export function punctuationRequest(text: string, previous: string): string {
   return `PREVIOUS: ${previous.trim() || '(nothing: this starts the dictation)'}\n\nTEXT: ${text}`;
 }
 
-export type PunctuationSource = 'model' | 'rules' | 'original';
+// 'timeout': the model did not answer in PUNCTUATION_WAIT_MS and the piece was typed as it came
+export type PunctuationSource = 'model' | 'rules' | 'original' | 'timeout';
+
+// The keyboard waits for words only so long (45 s on the phone, WordsWait), and a piece waits for the one
+// before it: this step may take a few seconds, never the 90 s the chat call itself allows (T-0178 review)
+export const PUNCTUATION_WAIT_MS = 4000;
+
+// The answer of `work`, or `fallback()` when it is not there after `ms`. The work is left to finish unseen.
+export function withDeadline<T>(work: Promise<T>, ms: number, fallback: () => T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback()), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback());
+      },
+    );
+  });
+}
 
 export interface Punctuated {
   text: string;

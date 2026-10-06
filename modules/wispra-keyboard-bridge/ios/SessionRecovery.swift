@@ -18,6 +18,10 @@ enum SessionRecovery {
 
   /// How long to wait before the next try after a start failed (2 s, 4 s, 8 s, 16 s, 30 s, 30 s); nil when
   /// it has been tried enough: the session is then reported over, so the keyboard asks the app to start one
+  /// While another app has the audio, the way back is tried this often, with no limit but the session's own
+  /// time: a call or a video can last longer than the six tries below, and must not end the session
+  static let interruptedRetrySeconds: TimeInterval = 3
+
   static func retryDelay(attempt: Int) -> TimeInterval? {
     guard attempt >= 0, attempt < 6 else { return nil }
     return min(30, 2 * pow(2, Double(attempt)))

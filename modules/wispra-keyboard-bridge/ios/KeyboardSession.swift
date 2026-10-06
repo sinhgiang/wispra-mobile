@@ -35,6 +35,13 @@ final class KeyboardSession {
   private var observingAudio = false
   private var restartAttempt = 0
   private var restartScheduled = false
+  /// Another app (or iOS) has the audio: the way back is tried every few seconds, never counted as a
+  /// failure and never ending the session, so a long call or a long video does not end it (T-0178 review)
+  private var interrupted = false
+  private var interruptRetryScheduled = false
+  private var interruptTask: UIBackgroundTaskIdentifier = .invalid
+  /// One line in the log for a run of failed tries, not one per try
+  private var failureLogged = false
   private var lastBeatAt = Date()
   /// What is wrong with the microphone, told to the keyboard in the status (nil: nothing)
   private var problem: String?
@@ -60,7 +67,8 @@ final class KeyboardSession {
     guard let beat = defaults.object(forKey: "sessionOpenSince") as? Date else { return }
     let last = defaults.object(forKey: "sessionLastBeat") as? Date ?? beat
     let gap = Int(Date().timeIntervalSince(last))
-    log("Wispra was started again; the last run ended without ending its session (its last beat was \(gap) s ago): iOS closed Wispra")
+    // Not knowable from here: iOS closing Wispra, or the user closing it by hand
+    log("Wispra was started again; the last run ended without ending its session (its last beat was \(gap) s ago): iOS closed Wispra, or it was closed by hand")
     defaults.removeObject(forKey: "sessionOpenSince")
   }
 
@@ -133,7 +141,16 @@ final class KeyboardSession {
       guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt else { return }
       let reason = (note.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt).map(String.init) ?? "none"
       self?.log("audio \(raw == SessionRecovery.interruptionBegan ? "interrupted by another app or iOS" : "interruption ended") (reason \(reason))")
-      if raw == SessionRecovery.interruptionBegan { self?.problem = "microphone used by another app" }
+      if raw == SessionRecovery.interruptionBegan {
+        // Zalo, Messenger or a call took the audio. Many apps never tell when they let it go (the interruption
+        // never "ends"), and Wispra, with no audio, is suspended within seconds: so keep trying to take it back,
+        // with background time to do it in
+        self?.interrupted = true
+        self?.problem = "microphone used by another app"
+        self?.beginBackgroundTime()
+        self?.writeStatus()
+        self?.retryWhileInterrupted()
+      }
       if SessionRecovery.shouldRestart(interruptionTypeRaw: raw) { self?.restartEngine() }
     }
     center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
@@ -166,11 +183,20 @@ final class KeyboardSession {
         log("the microphone was started again")
       }
       restartAttempt = 0
+      failureLogged = false
+      interrupted = false
+      endBackgroundTime()
       problem = nil
       writeStatus()
     } catch {
-      log("could not start the microphone again: \(error.localizedDescription)")
+      if !failureLogged {
+        failureLogged = true
+        log("could not start the microphone again: \(error.localizedDescription)")
+      }
       problem = "microphone busy"
+      writeStatus()
+      // Another app has the audio: the retry loop goes on, nothing is counted and the session stays
+      if interrupted { return }
       guard !restartScheduled else { return }
       guard let wait = SessionRecovery.retryDelay(attempt: restartAttempt) else {
         restartAttempt = 0
@@ -186,7 +212,36 @@ final class KeyboardSession {
     }
   }
 
+  /// Every few seconds while another app has the audio: take it back as soon as it can be
+  private func retryWhileInterrupted() {
+    guard interrupted, running, until > Date(), !interruptRetryScheduled else { return }
+    interruptRetryScheduled = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + SessionRecovery.interruptedRetrySeconds) { [weak self] in
+      guard let self = self else { return }
+      self.interruptRetryScheduled = false
+      guard self.interrupted, self.running else { return }
+      self.restartEngine()
+      self.retryWhileInterrupted()
+    }
+  }
+
+  /// A little time to run in once Wispra is in the background without audio
+  private func beginBackgroundTime() {
+    guard interruptTask == .invalid else { return }
+    interruptTask = UIApplication.shared.beginBackgroundTask(withName: "wispra-take-back-microphone") { [weak self] in
+      self?.endBackgroundTime()
+    }
+  }
+
+  private func endBackgroundTime() {
+    guard interruptTask != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(interruptTask)
+    interruptTask = .invalid
+  }
+
   func end() {
+    interrupted = false
+    endBackgroundTime()
     if running { log("session ended") }
     UserDefaults.standard.removeObject(forKey: "sessionOpenSince")
     heartbeat?.invalidate()
@@ -217,6 +272,13 @@ final class KeyboardSession {
     if !engine.isRunning {
       log("the keyboard asked to listen, but the microphone was stopped: starting it")
       restartEngine()
+    }
+    // Still stopped: no red mic that records nothing. The status says so (engine false, problem), and
+    // the keyboard tells the user within seconds.
+    guard engine.isRunning else {
+      log("the keyboard asked to listen, but the microphone could not be started: not listening")
+      writeStatus()
+      return
     }
     log("listening for the keyboard (engine running: \(engine.isRunning))")
     // A session in use goes on: the count starts again from now

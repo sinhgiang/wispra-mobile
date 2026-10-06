@@ -9,7 +9,7 @@ const ZALO = [
   '06/10 06:05:58 keyboard: purple mic tapped: session live (beat 3 s ago, 238 min left): start',
   '06/10 06:06:03 keyboard: red mic tapped: stop (app beat 4 s ago)',
   '06/10 06:06:30 keyboard: no words after 27 s and the app gave no sign of life for 38 s: iOS stopped Wispra?',
-  '06/10 06:09:00 app: Wispra was started again; the last run ended without ending its session (its last beat was 41 s ago): iOS closed Wispra',
+  '06/10 06:09:00 app: Wispra was started again; the last run ended without ending its session (its last beat was 41 s ago): iOS closed Wispra, or it was closed by hand',
 ];
 
 describe('the keyboard log (T-0178)', () => {
@@ -21,15 +21,17 @@ describe('the keyboard log (T-0178)', () => {
   it('points at iOS closing Wispra when the log says so, over the weaker signs before it', () => {
     const finding = lastFinding(ZALO);
     expect(finding?.line).toContain('iOS closed Wispra');
-    expect(finding?.meaning).toMatch(/iOS closed Wispra while its session was on/);
+    // The app cannot tell iOS from the user: the page does not say it was iOS
+    expect(finding?.meaning).toMatch(/iOS closed it .*or you closed it yourself/);
   });
 
-  it('points at the other signs: suspension, another app taking the microphone, no live session, slow words', () => {
+  it('points at the other signs: suspension, another app taking the microphone, slow words, a slow punctuation step', () => {
     expect(lastFinding(['06/10 06:00:01 app: the app was not running for 90 s (suspended by iOS), engine running: false'])?.meaning).toMatch(/suspended Wispra/);
     expect(lastFinding(['06/10 06:00:01 app: audio interrupted by another app or iOS (reason 0)'])?.meaning).toMatch(/Another app/);
     expect(lastFinding(['06/10 06:00:01 app: could not start the microphone again: busy'])?.meaning).toMatch(/busy with another app/);
     expect(lastFinding(['06/10 06:00:01 app: iOS warned that memory is short (it may close Wispra next)'])?.meaning).toMatch(/memory is short/);
-    expect(lastFinding(['06/10 06:00:01 keyboard: purple mic tapped: no live session (beat 80 s ago): opening Wispra'])?.meaning).toMatch(/no running session/);
+    expect(lastFinding(["06/10 06:00:01 keyboard: listening, but the app's microphone is stopped (microphone used by another app): not recording"])?.meaning).toMatch(/another app has the microphone/);
+    expect(lastFinding(['06/10 06:00:01 app: punctuation: timeout in 4001 ms, 12 words'])?.meaning).toMatch(/punctuation step did not answer/);
     expect(lastFinding(['06/10 06:00:01 keyboard: no words after 45 s (the app beats 3 s ago)'])?.meaning).toMatch(/did not come back in time/);
   });
 
@@ -42,6 +44,8 @@ describe('the keyboard log (T-0178)', () => {
       ]),
     ).toBeNull();
     expect(lastFinding([])).toBeNull();
+    // Normal use is no problem: a session that is not running makes the keyboard open Wispra
+    expect(lastFinding(['06/10 06:00:01 keyboard: purple mic tapped: no live session (beat 80 s ago): opening Wispra'])).toBeNull();
   });
 
   it('is shared with the finding first, then every line', () => {

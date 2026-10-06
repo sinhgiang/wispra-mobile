@@ -136,6 +136,7 @@ struct KeyboardTests {
     check("restarts when an interruption ends", SessionRecovery.shouldRestart(interruptionTypeRaw: SessionRecovery.interruptionEnded))
     check("waits while the interruption goes on", !SessionRecovery.shouldRestart(interruptionTypeRaw: SessionRecovery.interruptionBegan))
     check("retries after 2, 4, 8, 16, 30 and 30 seconds", (0..<6).compactMap { SessionRecovery.retryDelay(attempt: $0) } == [2, 4, 8, 16, 30, 30])
+    check("another app having the audio is tried every 3 s, not counted", SessionRecovery.interruptedRetrySeconds == 3)
     check("gives up after six tries", SessionRecovery.retryDelay(attempt: 6) == nil && SessionRecovery.retryDelay(attempt: -1) == nil)
   }
 
@@ -147,6 +148,16 @@ struct KeyboardTests {
     check("alive but nothing came in 45 s", WordsWait.outcome(waitedMs: 46_000, beatAgeMs: 3_000) == .timedOut)
     check("never waiting for ever, whatever the beat", WordsWait.outcome(waitedMs: 120_000, beatAgeMs: nil) == .timedOut && WordsWait.outcome(waitedMs: 120_000, beatAgeMs: 2_000) == .timedOut)
     check("the red mic: the app is gone when it stops beating", WordsWait.appStopped(beatAgeMs: 30_000) && !WordsWait.appStopped(beatAgeMs: 5_000))
+  }
+
+  static func micCheck() {
+    // Red mic, the app beats: the microphone down for one check is a blip, for two it is reported
+    check("a blip of one check is not reported", MicCheck.result(beatAgeMs: 3_000, engine: false, downChecks: 1) == .fine)
+    check("two checks with the engine stopped: the microphone is busy", MicCheck.result(beatAgeMs: 3_000, engine: false, downChecks: 2) == .micBusy)
+    check("engine running: fine, whatever the count", MicCheck.result(beatAgeMs: 3_000, engine: true, downChecks: 5) == .fine)
+    check("an app of an earlier build writes no engine: fine", MicCheck.result(beatAgeMs: 3_000, engine: nil, downChecks: 0) == .fine)
+    check("no beat at all wins over the engine: the app stopped", MicCheck.result(beatAgeMs: 40_000, engine: false, downChecks: 3) == .appStopped)
+    check("the count goes on while the engine is down and starts again when it runs", MicCheck.nextDownChecks(engine: false, current: 1) == 2 && MicCheck.nextDownChecks(engine: true, current: 3) == 0 && MicCheck.nextDownChecks(engine: nil, current: 3) == 0)
   }
 
   static func sharedLog() {
@@ -167,6 +178,7 @@ struct KeyboardTests {
     session()
     recovery()
     wordsWait()
+    micCheck()
     sharedLog()
     print("\(passed)/\(passed + failed) passed")
     if failed > 0 { exit(1) }

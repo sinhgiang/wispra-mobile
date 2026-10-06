@@ -48,7 +48,9 @@ jest.mock('@/modules/wispra-keyboard-bridge', () => ({
     mockDelivered.push({ utterance, index, text, last, failed });
     return true;
   },
+  noteKeyboardLog: () => undefined,
 }));
+jest.mock('@/lib/use-session', () => ({ useSession: () => null }));
 
 // eslint-disable-next-line import/first
 import { KeyboardSessionBridge } from '@/components/wispra/keyboard-session-bridge';

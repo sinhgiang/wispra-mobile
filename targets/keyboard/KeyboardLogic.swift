@@ -126,8 +126,33 @@ enum ChunkQueue {
   }
 }
 
-/// The listening session the Wispra app runs, as it reports it in the shared keychain
-/// (SharedChannel, "session"): { until, beat } in ms since 1970
+/// While the mic is red, what the app's status says about its microphone (T-0178 review): the app writes
+/// whether its engine runs. A microphone that stays stopped (another app has the audio) is no red mic that
+/// records nothing: the keyboard says so once it has been down for two checks (about four seconds, so a short
+/// blip is not reported).
+enum MicCheck {
+  enum Result: Equatable {
+    case fine
+    /// The app is not running
+    case appStopped
+    /// The app runs but cannot get the microphone
+    case micBusy
+  }
+
+  static let downChecksLimit = 2
+
+  /// The number of checks in a row that found the engine stopped; any other answer starts again
+  static func nextDownChecks(engine: Bool?, current: Int) -> Int {
+    engine == false ? current + 1 : 0
+  }
+
+  static func result(beatAgeMs: Double?, engine: Bool?, downChecks: Int) -> Result {
+    if WordsWait.appStopped(beatAgeMs: beatAgeMs) { return .appStopped }
+    if engine == false && downChecks >= downChecksLimit { return .micBusy }
+    return .fine
+  }
+}
+
 /// Never waiting for ever (T-0178). Words come back from the Wispra app, which iOS may stop while another app
 /// (Messenger, Zalo) is in front: the app's beat then stops, and the keyboard said "Đang viết…" for ever,
 /// even after the screen was locked and unlocked. These rules say, from how long it has waited and how long
@@ -160,6 +185,8 @@ enum WordsWait {
   }
 }
 
+/// The listening session the Wispra app runs, as it reports it in the shared keychain
+/// (SharedChannel, "session"): { until, beat } in ms since 1970
 enum SessionStatus {
   /// On, and the app wrote recently (it writes every few seconds while the session runs)
   static func isLive(untilMs: Double, beatMs: Double, nowMs: Double) -> Bool {
