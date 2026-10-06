@@ -8,6 +8,10 @@ import { EMPTY_STATE, recordDictation, recordFix, type LearnedState } from '@/li
 import type { LearningSettings } from '@/lib/learning';
 import type { LexiconEntry } from '@/lib/lexicon';
 
+// The first render of these screens loads a lot of modules; on a busy CI machine that took more than the
+// default 5 s once (the test is fast on a computer)
+jest.setTimeout(30_000);
+
 let mockVocabulary: string[] = [];
 let mockLexicon: LexiconEntry[] = [];
 let mockLearning: LearningSettings = { learning: true, autoLearn: true };
