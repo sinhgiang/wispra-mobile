@@ -1,0 +1,223 @@
+import { describe, expect, it } from '@jest/globals';
+
+import {
+  extractJson,
+  finishedMeeting,
+  NO_SOUND_IN_MEETING,
+  formatLine,
+  locate,
+  meetingStatus,
+  mergeLiveOutline,
+  needsSplit,
+  parseMindMap,
+  parseOutline,
+  piecesToSegments,
+  plainText,
+  recoverSegments,
+  pieceAt,
+  seekPosition,
+  seekShare,
+  segmentsWaiting,
+  shouldStartNextSegment,
+  splitLines,
+  transcriptLines,
+  type MeetingSegment,
+} from '../meeting';
+import { createEntry, previewText } from '../entries';
+
+function seg(over: Partial<MeetingSegment>): MeetingSegment {
+  return { id: 's', uri: 'file:///s.m4a', startMs: 0, durationMs: 30_000, status: 'done', text: null, error: null, ...over };
+}
+
+describe('cutting the recording into pieces', () => {
+  it('waits for a quiet moment between 12 and 20 seconds, as the computer cuts at most 20 s', () => {
+    expect(shouldStartNextSegment(10_000, -60)).toBe(false);
+    expect(shouldStartNextSegment(15_000, -20)).toBe(false);
+    expect(shouldStartNextSegment(15_000, -55)).toBe(true);
+    expect(shouldStartNextSegment(15_000, undefined)).toBe(false);
+    expect(shouldStartNextSegment(20_000, -10)).toBe(true);
+  });
+});
+
+describe('pieces that grew long while the screen was locked', () => {
+  it('are cut when longer than 45 seconds, and keep their place in the meeting', () => {
+    expect(needsSplit({ durationMs: 40_000 })).toBe(false);
+    expect(needsSplit({ durationMs: 67_030 })).toBe(true);
+    let n = 0;
+    const segs = piecesToSegments(
+      25_000,
+      [
+        { uri: 'file:///a-1.m4a', startMs: 0, durationMs: 30_000 },
+        { uri: 'file:///a-2.m4a', startMs: 30_000, durationMs: 30_000 },
+        { uri: 'file:///a-3.m4a', startMs: 60_000, durationMs: 7_030 },
+      ],
+      () => `p${++n}`,
+    );
+    expect(segs.map((s) => [s.id, s.startMs, s.durationMs, s.status])).toEqual([
+      ['p1', 25_000, 30_000, 'pending'],
+      ['p2', 55_000, 30_000, 'pending'],
+      ['p3', 85_000, 7_030, 'pending'],
+    ]);
+  });
+});
+
+describe('transcript', () => {
+  const segments = [
+    seg({ id: 'b', startMs: 31_000, text: 'Em đề xuất gọi lại 6 khách.' }),
+    seg({ id: 'a', startMs: 0, text: 'Tháng này chốt 14 hợp đồng.' }),
+    seg({ id: 'c', startMs: 62_000, status: 'pending', text: null }),
+    seg({ id: 'd', startMs: 93_000, text: '   ' }),
+  ];
+
+  it('numbers the transcribed pieces in order, skipping empty and waiting ones', () => {
+    const lines = transcriptLines(segments);
+    expect(lines.map(formatLine)).toEqual(['[1] (0:00) Tháng này chốt 14 hợp đồng.', '[2] (0:31) Em đề xuất gọi lại 6 khách.']);
+    expect(plainText(segments)).toBe('Tháng này chốt 14 hợp đồng. Em đề xuất gọi lại 6 khách.');
+  });
+
+  it('splits long transcripts without cutting a paragraph', () => {
+    const lines = Array.from({ length: 10 }, (_, i) => ({ ref: i + 1, startMs: i * 30_000, text: 'x'.repeat(40) }));
+    const parts = splitLines(lines, 200);
+    expect(parts.flat()).toEqual(lines);
+    expect(parts.every((p) => p.map(formatLine).join('\n').length <= 200)).toBe(true);
+  });
+});
+
+describe('meeting state', () => {
+  it('is pending while a piece waits, failed when one could not be transcribed, else done', () => {
+    expect(meetingStatus([seg({}), seg({ status: 'pending' })])).toBe('pending');
+    expect(meetingStatus([seg({}), seg({ status: 'failed' })])).toBe('failed');
+    expect(meetingStatus([seg({}), seg({})])).toBe('done');
+  });
+
+  it('keeps the piece being recorded when the app was killed', () => {
+    expect(recoverSegments([seg({ status: 'recording' })])[0].status).toBe('pending');
+    expect(segmentsWaiting([seg({ id: 'x', startMs: 9, status: 'pending' }), seg({ id: 'y', startMs: 1, status: 'pending' })]).map((s) => s.id)).toEqual(['y', 'x']);
+  });
+
+  it('finds which piece a moment is in', () => {
+    const s = [seg({ startMs: 0, durationMs: 30_000 }), seg({ startMs: 30_000, durationMs: 28_000 })];
+    expect(locate(s, 45_000)).toEqual({ index: 1, offsetMs: 15_000 });
+    expect(locate(s, 10_000)).toEqual({ index: 0, offsetMs: 10_000 });
+    expect(locate([], 1)).toBeNull();
+  });
+});
+
+describe('reading AI answers', () => {
+  it('finds the JSON even inside a code fence', () => {
+    expect(extractJson('```json\n{"a": 1}\n```')).toEqual({ a: 1 });
+    expect(extractJson('Here: {"a": {"b": 2}} done')).toEqual({ a: { b: 2 } });
+    expect(extractJson('no json')).toBeNull();
+  });
+
+  const lines = [
+    { ref: 1, startMs: 0, text: 'a' },
+    { ref: 2, startMs: 31_000, text: 'b' },
+  ];
+
+  it('maps topic and action refs to times and drops what it cannot trust', () => {
+    const outline = parseOutline(
+      {
+        title: 'Weekly sales',
+        summary: 'Fourteen contracts.',
+        topics: [{ title: 'Monthly results', start: 1 }, { title: 'Trial customers', start: 2 }, { start: 2 }],
+        actions: [{ text: 'Send the list', owner: 'Lan', due: 'Monday', ref: 2 }, { text: 'Plan', ref: 99 }, { owner: 'x' }],
+      },
+      lines,
+    );
+    expect(outline).toEqual({
+      title: 'Weekly sales',
+      summary: 'Fourteen contracts.',
+      topics: [
+        { title: 'Monthly results', startMs: 0 },
+        { title: 'Trial customers', startMs: 31_000 },
+      ],
+      actions: [{ text: 'Send the list', owner: 'Lan', due: 'Monday', atMs: 31_000 }, { text: 'Plan' }],
+    });
+  });
+
+  it('reads a mind map, two levels deep at most', () => {
+    const map = parseMindMap({
+      title: 'Sales',
+      topics: [{ label: 'Results', points: [{ label: '14 contracts', points: [{ label: 'deep', points: [{ label: 'too deep' }] }] }] }],
+      actions: [{ label: 'Send list', owner: 'Lan', due: 'Monday' }],
+      branchLabels: { decisions: 'Quyết định' },
+    });
+    expect(map?.topics[0].points?.[0].points?.[0]).toEqual({ label: 'deep' });
+    expect(map?.actions[0]).toEqual({ label: 'Send list', note: 'Lan · Monday' });
+    expect(map?.branchLabels).toEqual({ decisions: 'Quyết định', actions: 'Action items', questions: 'Open questions' });
+    expect(parseMindMap({ title: 'x', topics: [] })).toBeNull();
+  });
+
+  it('adds live topics and new action items, skipping a topic that just continues', () => {
+    const notes = { topics: [{ title: 'Results', startMs: 0 }], actions: [{ text: 'Send the list' }] };
+    const merged = mergeLiveOutline(
+      notes,
+      { topics: [{ title: 'Results again', startMs: 31_000 }, { title: 'Budget', startMs: 62_000 }], actions: [{ text: 'send the list' }, { text: 'Call Minh' }] },
+      3,
+      true,
+    );
+    expect(merged.topics?.map((t) => t.title)).toEqual(['Results', 'Budget']);
+    expect(merged.actions?.map((a) => a.text)).toEqual(['Send the list', 'Call Minh']);
+    expect(merged.liveRefs).toBe(3);
+  });
+});
+
+describe('a meeting once its pieces are through (T-0154 review)', () => {
+  it('says so when no piece had any sound, instead of looking done and empty', () => {
+    const silent = [seg({ id: 'a', text: '' }), seg({ id: 'b', startMs: 30_000, text: '' })];
+    expect(finishedMeeting(silent)).toEqual({ status: 'done', text: null, error: NO_SOUND_IN_MEETING });
+    const meeting = { ...createEntry('meeting', new Date(2026, 9, 5, 6, 30), 'm'), durationMs: 60_000, ...finishedMeeting(silent) };
+    expect(previewText(meeting)).toBe(`1:00 · ${NO_SOUND_IN_MEETING}`);
+  });
+
+  it('keeps the words of a meeting with sound, and asks to try again when a piece failed', () => {
+    expect(finishedMeeting([seg({ text: 'Chào cả nhà' }), seg({ id: 'b', text: '' })])).toEqual({ status: 'done', text: 'Chào cả nhà', error: null });
+    expect(finishedMeeting([seg({ text: 'Chào' }), seg({ id: 'b', status: 'failed' })])).toMatchObject({ status: 'failed', error: expect.stringContaining('Try again') });
+    expect(finishedMeeting([seg({ status: 'pending' })])).toEqual({ status: 'pending', text: null, error: null });
+  });
+});
+
+describe('seeking across the pieces of a meeting (T-0164 review)', () => {
+  // 24 pieces of 30 s, as the owner's 11:33 meeting
+  const pieces = Array.from({ length: 24 }, (_, i) => ({ startMs: i * 30_000 }));
+
+  it('finds the piece a moment is in, and how far into it', () => {
+    expect(pieceAt(pieces, 0)).toBe(0);
+    expect(pieceAt(pieces, 29_999)).toBe(0);
+    expect(pieceAt(pieces, 30_000)).toBe(1);
+    expect(pieceAt(pieces, 347_000)).toBe(11);
+    expect(347_000 - pieces[pieceAt(pieces, 347_000)].startMs).toBe(17_000);
+    expect(pieceAt(pieces, 693_000)).toBe(23);
+    expect(pieceAt(pieces, -5)).toBe(0);
+    expect(pieceAt([], 1000)).toBe(0);
+  });
+
+  it('every second of the bar lands in a piece, from the first to the last', () => {
+    const total = 11 * 60_000 + 33_000;
+    const seen = new Set<number>();
+    for (let x = 0; x <= 300; x++) seen.add(pieceAt(pieces, seekPosition(x, 300, total)));
+    expect(Math.min(...seen)).toBe(0);
+    expect(Math.max(...seen)).toBe(23);
+    expect(seen.size).toBe(24);
+  });
+});
+
+describe('the seek bar (T-0164)', () => {
+  it('goes from the start to the end of the meeting, to the second', () => {
+    const total = 11 * 60_000 + 33_000; // 11:33, the owner's meeting
+    expect(seekPosition(0, 300, total)).toBe(0);
+    expect(seekPosition(300, 300, total)).toBe(total);
+    expect(seekPosition(150, 300, total)).toBe(347_000);
+    expect(seekPosition(-20, 300, total)).toBe(0);
+    expect(seekPosition(999, 300, total)).toBe(total);
+    expect(seekPosition(10, 0, total)).toBe(0);
+  });
+
+  it('shows how far along a moment is', () => {
+    expect(seekShare(0, 1000)).toBe(0);
+    expect(seekShare(250, 1000)).toBe(0.25);
+    expect(seekShare(5000, 1000)).toBe(1);
+    expect(seekShare(10, 0)).toBe(0);
+  });
+});

@@ -1,40 +1,59 @@
 {
   "expo": {
-    "name": "wispra-mobile",
+    "name": "Wispra",
     "slug": "wispra-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "wispramobile",
-    "userInterfaceStyle": "automatic",
+    "icon": "./assets/brand/wispra-icon.png",
+    "scheme": [
+      "wispramobile",
+      "wispra"
+    ],
+    "userInterfaceStyle": "dark",
     "ios": {
-      "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.sinhgiang.wispramobile"
+      "bundleIdentifier": "com.sinhgiang.wispramobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "AppIdentifierPrefix": "$(AppIdentifierPrefix)"
+      },
+      "entitlements": {
+        "keychain-access-groups": [
+          "$(AppIdentifierPrefix)com.sinhgiang.wispramobile",
+          "$(AppIdentifierPrefix)com.sinhgiang.wispramobile.shared"
+        ]
+      }
     },
     "android": {
       "package": "com.sinhgiang.wispramobile",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#0f1117",
+        "foregroundImage": "./assets/brand/wispra-adaptive-foreground.png"
       },
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/brand/wispra-mark.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#0f1117",
+          "image": "./assets/brand/wispra-mark.png",
+          "imageWidth": 120
         }
-      ]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Wispra records your voice to turn it into text.",
+          "enableBackgroundRecording": true
+        }
+      ],
+      "expo-secure-store",
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -44,8 +63,14 @@
       "router": {},
       "eas": {
         "projectId": "1dd82f99-15b5-4b7d-b05e-5cb109f05b93"
+      },
+      "wispraCloud": {
+        "apiBase": "https://wispra-web.vercel.app",
+        "supabaseUrl": "https://tpiycamfsagesjeciubg.supabase.co",
+        "supabasePublishableKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwaXljYW1mc2FnZXNqZWNpdWJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0OTA1MTAsImV4cCI6MjA5NzA2NjUxMH0.qxMVAbBSsBhWOeB5Xak_eQthjcI-wXGo87P7bVcoStU"
       }
     },
-    "owner": "sinhgiang"
+    "owner": "sinhgiang",
+    "backgroundColor": "#0f1117"
   }
 }

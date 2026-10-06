@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Same declaration as the app (app.json): only the standard HTTPS of iOS is used -->
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
+  <!-- The team prefix ("AY64ZULZ5R."), to name the keychain group shared with the app (SharedChannel.swift) -->
+  <key>AppIdentifierPrefix</key>
+  <string>$(AppIdentifierPrefix)</string>
+  <key>NSExtension</key>
+  <dict>
+    <key>NSExtensionPointIdentifier</key>
+    <string>com.apple.keyboard-service</string>
+    <key>NSExtensionPrincipalClass</key>
+    <string>$(PRODUCT_MODULE_NAME).KeyboardViewController</string>
+    <key>NSExtensionAttributes</key>
+    <dict>
+      <!-- Full access lets the keyboard read the words the Wispra app hands over through the
+           pasteboard. Typing letters works without it; the keyboard keeps nothing the user types. -->
+      <key>RequestsOpenAccess</key>
+      <true/>
+      <key>IsASCIICapable</key>
+      <true/>
+      <key>PrefersRightToLeft</key>
+      <false/>
+      <key>PrimaryLanguage</key>
+      <string>mul</string>
+    </dict>
+  </dict>
+</dict>
+</plist>

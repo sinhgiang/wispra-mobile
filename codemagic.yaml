@@ -1,0 +1,225 @@
+# iOS builds run on Codemagic because there is no Mac on the development machine.
+# Pushes never start a build. The TestFlight workflow starts by itself when a tag named build-*
+# is pushed, through the repository's Codemagic webhook (T-0156: the agent tags the commit the owner should try, so the owner never opens
+# Codemagic); the other workflows start only with "Start new build" in Codemagic.
+#
+# The app is an Expo project: `expo prebuild` generates the ios/ folder from app.json on the
+# build machine (it is not committed), then CocoaPods and Xcode build it.
+
+workflows:
+  # Checks that the app compiles for iOS. Nothing is signed or sent to Apple.
+  ios-unsigned:
+    name: iOS Unsigned Build
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      node: 22
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install JavaScript dependencies
+        script: npm ci
+      - name: Run the tests
+        script: npm test -- --ci
+      - name: Generate the iOS project
+        script: npx expo prebuild --platform ios --no-install
+      - name: Install CocoaPods
+        script: cd ios && pod install
+      - name: Build for a device without signing
+        script: |
+          xcodebuild -workspace ios/Wispra.xcworkspace -scheme Wispra \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO build | xcpretty
+    artifacts:
+      - /tmp/xcodebuild_logs/*.log
+
+  # Run once before the first TestFlight build (and again if a profile is missing). In the Apple
+  # Developer account it registers the bundle id of the Wispra keyboard extension if needed, and
+  # creates the App Store provisioning profiles of the app and of the keyboard, tied to the team's
+  # valid distribution certificates (the one Codemagic generated for Lenvid among them), using the
+  # App Store Connect API key lenvid-asc. "Fetch profiles" in Codemagic only lists profiles that
+  # already exist there; after this run it lists these two. Needs no secret: the integration
+  # supplies the API key, and making a profile needs only the certificates' ids, never their private
+  # keys. A profile that is already there is left as it is. Signs nothing and uploads nothing.
+  ios-create-profile:
+    name: 'iOS: create App Store profile'
+    max_build_duration: 15
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: lenvid-asc
+    scripts:
+      - name: Create the App Store profiles if they are missing
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          # Ids from the JSON the Codemagic CLI prints (a list of Apple resources), skipping
+          # anything that has expired
+          ids() {
+            python3 -c '
+          import json, sys, datetime
+          data = json.load(sys.stdin)
+          now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          for item in data:
+              exp = (item.get("attributes") or {}).get("expirationDate")
+              if exp is None or exp > now:
+                  print(item["id"])
+          '
+          }
+          certs=$( { app-store-connect certificates list --type DISTRIBUTION --json | ids; app-store-connect certificates list --type IOS_DISTRIBUTION --json | ids; } | sort -u)
+          if [ -z "$certs" ]; then
+            echo "No valid distribution certificate in the Apple Developer account."
+            exit 1
+          fi
+          echo "Distribution certificates found: $(echo "$certs" | wc -l | tr -d ' ')"
+
+          # bundle id | name of the bundle id (if it has to be registered) | profile name
+          for line in \
+            "com.sinhgiang.wispramobile|Wispra|Wispra App Store" \
+            "com.sinhgiang.wispramobile.keyboard|Wispra Keyboard|Wispra Keyboard App Store"; do
+            IFS='|' read -r bundle_id bundle_name profile_name <<< "$line"
+            existing=$(app-store-connect profiles list --type IOS_APP_STORE --name "$profile_name" --state ACTIVE --json | ids)
+            if [ -n "$existing" ]; then
+              echo "The profile '$profile_name' already exists."
+              continue
+            fi
+            bundle=$(app-store-connect bundle-ids list --bundle-id-identifier "$bundle_id" --strict-match-identifier --json | ids | head -n 1)
+            if [ -z "$bundle" ]; then
+              echo "Registering the bundle id $bundle_id."
+              app-store-connect bundle-ids create "$bundle_id" --name "$bundle_name" --platform IOS
+              bundle=$(app-store-connect bundle-ids list --bundle-id-identifier "$bundle_id" --strict-match-identifier --json | ids | head -n 1)
+            fi
+            # shellcheck disable=SC2086
+            app-store-connect profiles create "$bundle" --type IOS_APP_STORE --name "$profile_name" --certificate-ids $certs
+            echo "Created the App Store profile '$profile_name' for $bundle_id."
+          done
+          echo "Next: Codemagic > Team settings > codemagic.yaml settings > Code signing identities >"
+          echo "iOS provisioning profiles > Fetch profiles, select 'Wispra App Store' and 'Wispra Keyboard App Store',"
+          echo "Reference names wispra-app-store and wispra-keyboard-app-store, Download selected."
+
+  # Signed build, uploaded to App Store Connect so it appears in TestFlight for internal
+  # testers. It is never sent to App Review or to external beta review: those stay manual steps
+  # in App Store Connect, done by the owner.
+  ios-testflight:
+    name: iOS TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    # Started by a pushed tag build-<date>-<time> (for example build-20261005-1300) on the commit to
+    # build. Codemagic hears of the tag through the repository's webhook to
+    # https://api.codemagic.io/hooks/6ac25f672f5acb1c7efd1926 (its push event is enough); without
+    # it no tag starts a build, the Codemagic GitHub App alone does not. No key is needed. Codemagic
+    # reads this file from the tagged commit. Branch pushes start nothing. How-to: CLAUDE.md.
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'build-*'
+          include: true
+        # The Android workflow (.github/workflows/android.yml) moves a tag build-<branch> to every
+        # pushed commit for its test APK release: those must never start an iPhone build
+        - pattern: 'build-mobile-*'
+          include: false
+    integrations:
+      # The App Store Connect API key added in Codemagic for Lenvid; one key serves every app of
+      # the same Apple team. The key itself is never in this file.
+      app_store_connect: lenvid-asc
+    environment:
+      node: 22
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        # The certificate and App Store profiles stored in Codemagic (Team settings > Code signing
+        # identities) for this bundle id. Extensions such as the keyboard
+        # (com.sinhgiang.wispramobile.keyboard) are matched too.
+        distribution_type: app_store
+        bundle_identifier: com.sinhgiang.wispramobile
+      vars:
+        # The app's numeric Apple ID in App Store Connect (App Information): "Wispra: Voice
+        # Dictation", created by the owner. If it is ever emptied, the build stops with a message.
+        APP_STORE_APPLE_ID: "6819026553"
+    scripts:
+      - name: Check the App Store Connect app
+        script: |
+          #!/bin/bash
+          if [ -z "$APP_STORE_APPLE_ID" ]; then
+            echo "APP_STORE_APPLE_ID is empty in codemagic.yaml: create the app in App Store Connect first,"
+            echo "then put its Apple ID (a number) in the ios-testflight workflow."
+            exit 1
+          fi
+      - name: Build number and Apple Team ID for the Xcode project
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          # App Store Connect refuses a build number it has already seen: take the newest one on
+          # TestFlight and add one (1 before the first upload). Set before `expo prebuild`
+          # (app.config.js reads it), so the app and the keyboard extension get the same number.
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          case "$LATEST" in ''|*[!0-9]*) LATEST=0 ;; esac
+          BUILD_NUMBER=$((LATEST + 1))
+          echo "Latest build number on TestFlight: $LATEST. This build: $BUILD_NUMBER."
+          echo "IOS_BUILD_NUMBER=$BUILD_NUMBER" >> "$CM_ENV"
+          # The team that owns the installed App Store profiles; the keyboard target needs it
+          TEAM=""
+          for profile in "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
+            [ -e "$profile" ] || continue
+            TEAM=$(security cms -D -i "$profile" | plutil -extract TeamIdentifier.0 raw -o - - || true)
+            [ -n "$TEAM" ] && break
+          done
+          if [ -z "$TEAM" ]; then
+            echo "No App Store profile is installed: run 'iOS: create App Store profile', then Fetch profiles in Codemagic."
+            exit 1
+          fi
+          echo "Apple Team ID: $TEAM"
+          echo "APPLE_TEAM_ID=$TEAM" >> "$CM_ENV"
+      - name: Install JavaScript dependencies
+        script: npm ci
+      - name: Run the tests
+        script: npm test -- --ci
+      - name: Generate the iOS project
+        script: npx expo prebuild --platform ios --no-install
+      - name: Install CocoaPods
+        script: cd ios && pod install
+      - name: Apply signing profiles to the Xcode project
+        script: xcode-project use-profiles
+      - name: Build a signed .ipa
+        script: |
+          xcode-project build-ipa --workspace ios/Wispra.xcworkspace --scheme Wispra
+      # The app and the keyboard pass the words through one keychain group (T-0163,
+      # SharedChannel.swift). In the signed .ipa: both Info.plists have the team prefix filled in, and
+      # both signatures carry the shared group. Otherwise the build stops here, before TestFlight,
+      # instead of the keyboard silently waiting for words in another group.
+      - name: Check the keychain group the app and the keyboard share
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          IPA=$(ls build/ios/ipa/*.ipa | head -n 1)
+          OUT=$(mktemp -d)
+          unzip -q "$IPA" -d "$OUT"
+          APP=$(ls -d "$OUT"/Payload/*.app | head -n 1)
+          for BUNDLE in "$APP" "$APP/PlugIns/WispraKeyboard.appex"; do
+            NAME=$(basename "$BUNDLE")
+            PREFIX=$(plutil -extract AppIdentifierPrefix raw -o - "$BUNDLE/Info.plist" || true)
+            echo "$NAME: AppIdentifierPrefix=$PREFIX"
+            case "$PREFIX" in
+              ""|*'$'*) echo "$NAME: AppIdentifierPrefix was not filled in at build time"; exit 1 ;;
+            esac
+            if ! codesign -d --entitlements - --xml "$BUNDLE" 2>/dev/null | grep -q "${PREFIX}com.sinhgiang.wispramobile.shared"; then
+              echo "$NAME: its signature has no ${PREFIX}com.sinhgiang.wispramobile.shared keychain group"
+              exit 1
+            fi
+            echo "$NAME: shares the keychain group ${PREFIX}com.sinhgiang.wispramobile.shared"
+          done
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        # No beta app review: that is only for external testers (Codemagic CLI: --testflight
+        # "Enable submission of an app for Testflight beta app review to allow external testing")
+        submit_to_testflight: false
+        # No beta_groups: adding the build to a group is "post-processing", done after the upload,
+        # and when it fails (group name not found, Apple still processing) the whole build shows
+        # "finished with post-processing failed" although the .ipa reached App Store Connect (build
+        # 3). Build 3 still reached the owner's internal group "Internal" (its beta_groups step had
+        # failed), so that group takes new builds by itself and nothing is needed here.
+        submit_to_app_store: false
