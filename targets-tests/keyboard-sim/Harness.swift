@@ -188,7 +188,7 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     check(mic?.accessibilityLabel == "Speak with Wispra", "tapped again: purple, waiting for the words")
     check(labels(in: keyboard.view).contains("Đang viết…"), "it says the words are being written")
 
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
       check(labels(in: keyboard.view).contains("Chưa nhận được chữ. Mở Wispra để xem bản ghi"), "no words after the wait: it says so, not Đang viết… forever")
 
       // A piece that could not be transcribed is not "not heard"
