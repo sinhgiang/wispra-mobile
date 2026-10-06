@@ -4,6 +4,7 @@ import { currentSession, validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
 import type { Entry } from './entries';
 import { applyReplacements, buildSttPrompt, selectTerms, STT_PROMPT_MAX_TERMS } from './lexicon';
+import { promptAutoTerms } from './learned/learned';
 import { loadLearned, loadLearning, loadLexicon, loadTranscribeLanguage, loadVocabulary } from './storage';
 import { dropTermListEcho, spellVocabulary } from './vocabulary';
 import { noteKeyboardLog } from '@/modules/wispra-keyboard-bridge';
@@ -148,7 +149,7 @@ export function learnedPrompt(): string | undefined {
     // With learning on: the vocabulary, the words learned from fixes, and (when "Learn my vocabulary from
     // History" is on) the words picked up from History, which only fill the room that is left
     const terms = learning.learning
-      ? selectTerms(vocabulary, loadLexicon(), STT_PROMPT_MAX_TERMS, learning.autoLearn ? loadLearned().autoTerms : [])
+      ? selectTerms(vocabulary, loadLexicon(), STT_PROMPT_MAX_TERMS, learning.autoLearn ? promptAutoTerms(loadLearned()) : [])
       : vocabulary.slice(0, STT_PROMPT_MAX_TERMS);
     return buildSttPrompt(terms);
   } catch {

@@ -14,6 +14,7 @@ import {
   historyEntries,
   keepAutoTerm,
   parseLearnedState,
+  promptAutoTerms,
   recordDictation,
   recordFix,
   refreshAutoTerms,
@@ -111,6 +112,16 @@ describe('Picked up from your History', () => {
     expect(lexiconMode(kept[0])).toBe('spelling');
     const removed = removeAutoTerm(EMPTY_STATE, id);
     expect(autoTermList(inputs(SEEN, { state: removed }))).toEqual([]);
+  });
+
+  it('Remove takes the word out of what Whisper is told at once, and a removed word stays out of the prompt list', () => {
+    const picked = refreshAutoTerms(inputs(SEEN));
+    expect(promptAutoTerms(picked)).toEqual(['Lumora']);
+    const removed = removeAutoTerm(picked, 'term:lumora');
+    expect(removed.autoTerms).toEqual([]);
+    expect(promptAutoTerms(removed)).toEqual([]);
+    // Even if a refresh brought it back into the saved list, it is not told to Whisper
+    expect(promptAutoTerms({ ...removed, autoTerms: ['Lumora', 'Other'] })).toEqual(['Other']);
   });
 
   it('is kept for the speech recogniser only when it changed, and starts over with Clear all', () => {

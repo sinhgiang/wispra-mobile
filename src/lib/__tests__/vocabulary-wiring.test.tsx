@@ -11,6 +11,7 @@ let mockLexicon: LexiconEntry[] = [];
 let mockLearning = true;
 let mockAutoLearn = true;
 let mockAutoTerms: string[] = [];
+let mockDismissed: string[] = [];
 let mockAnswer = ' mở git hub lên rồi cap cut';
 const mockUploads: { parameters: Record<string, string> }[] = [];
 const mockListeners: ((chunk: unknown) => void)[] = [];
@@ -38,7 +39,7 @@ jest.mock('../storage', () => ({
   loadVocabulary: () => [...mockVocabulary],
   loadLexicon: () => JSON.parse(JSON.stringify(mockLexicon)),
   loadLearning: () => ({ learning: mockLearning, autoLearn: mockAutoLearn }),
-  loadLearned: () => ({ autoTerms: [...mockAutoTerms] }),
+  loadLearned: () => ({ autoTerms: [...mockAutoTerms], dismissed: [...mockDismissed] }),
   loadSessionMinutes: () => 240,
   sessionEndedByUser: () => false,
 }));
@@ -82,6 +83,7 @@ beforeEach(() => {
   mockLearning = true;
   mockAutoLearn = true;
   mockAutoTerms = [];
+  mockDismissed = [];
   mockAnswer = ' mở git hub lên rồi cap cut';
   mockUploads.length = 0;
   mockListeners.length = 0;
@@ -158,6 +160,14 @@ describe('the words picked up from History', () => {
     mockAutoTerms = ['Supabase', 'Github'];
     await transcribeAudio('file:///a.m4a', 3_000);
     expect(mockUploads[0].parameters.prompt).toBe('Github, Claude, Supabase.');
+  });
+
+  it('never include a word the person removed, even while it is still in the saved list (T-0182 review)', async () => {
+    mockVocabulary = ['Github'];
+    mockAutoTerms = ['Supabase', 'Lumora', 'Claude Code'];
+    mockDismissed = ['term:lumora', 'term:claude code'];
+    await transcribeAudio('file:///a.m4a', 3_000);
+    expect(mockUploads[0].parameters.prompt).toBe('Github, Supabase.');
   });
 
   it('are left out when Learn my vocabulary from History is off, or learning is', async () => {
