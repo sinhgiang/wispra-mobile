@@ -4,7 +4,7 @@
 // so it is tested; src/lib/storage.ts keeps it in learned.json.
 
 import { meetingLines, type Entry } from '../entries';
-import { addManualEntry, type LexiconEntry } from '../lexicon';
+import { addManualEntry, normKey, type LexiconEntry } from '../lexicon';
 import { computeAutoTerms } from './autoVocabLogic';
 import { SUGGEST_MAX_DISMISSED } from './constants';
 import { addDictation, addFix, buildReport, dayOf, fixDelta, sanitizeRecords, type EvalRecord, type FixFacts } from './evalLogic';
@@ -134,9 +134,18 @@ export function keepAutoTerm(i: Inputs, id: string, now: string, makeId: () => s
   return found ? addManualEntry(i.lexicon, found.term, [], now, makeId).entries : i.lexicon;
 }
 
-// Remove: never learned again
+// The id a picked-up word is hidden under ("term:<lowercased term>", as on the computer)
+const autoId = (term: string): string => `term:${normKey(term)}`;
+
+// Remove: never learned again, and out of the list Whisper is told at once (not only at the next refresh)
 export function removeAutoTerm(state: LearnedState, id: string): LearnedState {
-  return remember(state, id);
+  const hidden = remember(state, id);
+  return { ...hidden, autoTerms: hidden.autoTerms.filter((t) => autoId(t) !== id) };
+}
+
+// The picked-up words Whisper may be told about: never one the person removed (T-0182 review)
+export function promptAutoTerms(state: LearnedState): string[] {
+  return state.autoTerms.filter((t) => !state.dismissed.includes(autoId(t)));
 }
 
 // What the next transcription is told to listen for besides the lists: the words picked up from History
