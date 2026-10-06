@@ -22,6 +22,8 @@ const SIGNS: { match: RegExp; meaning: string }[] = [
   { match: /interrupted by another app or iOS/i, meaning: 'Another app (or iOS) took the microphone from Wispra.' },
   { match: /could not start the microphone again/i, meaning: 'Wispra could not take the microphone back: it is busy with another app.' },
   { match: /memory is short/i, meaning: 'iOS warned that memory is short: it may close Wispra when a big app opens.' },
+  { match: /account: .*(signed out|read, signed out)/i, meaning: 'Wispra had no sign-in to use (it was signed out, or the refresh was refused and nothing newer was stored). Sign in again in Account.' },
+  { match: /account: .*could not be read/i, meaning: 'The phone would not give Wispra its saved sign-in (usually a locked phone). It is not signed out: the next try reads it again.' },
   { match: /microphone is stopped/i, meaning: 'Wispra runs but another app has the microphone, so nothing was being recorded. The keyboard said so.' },
   { match: /punctuation: timeout/i, meaning: 'The punctuation step did not answer in a few seconds: the words were typed without full stops and commas.' },
   { match: /no words after \d+ s/i, meaning: 'The words did not come back in time.' },

@@ -9,24 +9,33 @@ import { Alert, Linking, StyleSheet } from 'react-native';
 import type { SetupState } from '@/lib/setup-guide';
 
 const mockPush = jest.fn();
+const mockReplace = jest.fn();
 let mockSetup: SetupState;
 const mockSaveMinutes = jest.fn();
 let mockSavedLanguage = 'vi';
 const mockLanguageSaves: string[] = [];
 const mockSessionEnded: boolean[] = [];
 const mockLogLines: string[] = [];
+// What the page the keyboard's mic opens sees of the account (T-0182)
+let mockSessionLoaded = true;
+let mockDataLoaded = true;
+let mockSignedIn = true;
+let mockCloudAllowed = true;
 const mockNativeLanguage: string[] = [];
 const mockStartSession = jest.fn(async (minutes: number) => ({ active: true, until: Date.now() + minutes * 60_000, listening: false }));
 
 jest.mock('react-native-safe-area-context', () => (jest.requireActual('react-native-safe-area-context/jest/mock') as { default: object }).default);
-jest.mock('expo-router', () => ({ router: { push: (...args: unknown[]) => mockPush(...args), back: jest.fn() }, useFocusEffect: () => undefined }));
+jest.mock('expo-router', () => ({ router: { push: (...args: unknown[]) => mockPush(...args), replace: (...args: unknown[]) => mockReplace(...args), back: jest.fn() }, useFocusEffect: () => undefined }));
 jest.mock('@/lib/use-setup', () => ({ useSetupState: () => mockSetup }));
-jest.mock('@/lib/use-session', () => ({ useSession: () => ({ email: 'owner@example.com' }) }));
+jest.mock('@/lib/use-session', () => ({
+  useSession: () => (mockSignedIn ? { email: 'owner@example.com' } : null),
+  useSessionLoaded: () => mockSessionLoaded,
+}));
 jest.mock('@/lib/use-recording', () => ({
   useRecording: () => ({ phase: 'idle', durationMs: 0, error: null, start: jest.fn(), stop: jest.fn(), cancel: jest.fn() }),
 }));
 jest.mock('@/lib/entries-store', () => ({
-  useEntries: () => ({ entries: [], syncState: { note: null, at: null, waitingDeletes: 0 }, retry: jest.fn(), busy: new Set(), cloudAllowed: () => true }),
+  useEntries: () => ({ entries: [], syncState: { note: null, at: null, waitingDeletes: 0 }, retry: jest.fn(), busy: new Set(), loaded: mockDataLoaded, cloudAllowed: () => mockCloudAllowed }),
 }));
 jest.mock('@/lib/storage', () => ({
   loadSessionMinutes: () => 60,
@@ -45,6 +54,7 @@ jest.mock('@/modules/wispra-keyboard-bridge', () => ({
   startSession: (m: number) => mockStartSession(m),
   endSession: async () => ({ active: false, until: 0, listening: false }),
   keyboardLog: async () => [...mockLogLines],
+  noteKeyboardLog: () => undefined,
   clearKeyboardLog: async () => {
     mockLogLines.length = 0;
   },
@@ -76,11 +86,16 @@ const android: SetupState = { platform: 'android', signedIn: true, keyboard: nul
 
 beforeEach(() => {
   mockPush.mockClear();
+  mockReplace.mockClear();
   mockSaveMinutes.mockClear();
   mockSavedLanguage = 'vi';
   mockLanguageSaves.length = 0;
   mockSessionEnded.length = 0;
   mockLogLines.length = 0;
+  mockSessionLoaded = true;
+  mockDataLoaded = true;
+  mockSignedIn = true;
+  mockCloudAllowed = true;
   mockNativeLanguage.length = 0;
   mockStartSession.mockClear();
   mockSetup = iphone;
@@ -295,6 +310,56 @@ describe('what iOS does not allow is said plainly (T-0178, point 3)', () => {
     mockSetup = android;
     await render(<AccountScreen />);
     expect(screen.queryByText(SESSION_LIMITS_NOTE, { exact: false })).toBeNull();
+  });
+});
+
+describe("the page the keyboard's mic opens, and the account (T-0182)", () => {
+  it('does not say "Sign in first" while the saved sign-in is still being read', async () => {
+    mockSessionLoaded = false;
+    mockSignedIn = false;
+    mockCloudAllowed = false;
+    await render(<KeyboardSessionScreen />);
+    expect(screen.getByText('Checking your account…')).toBeTruthy();
+    expect(screen.queryByText('Sign in first')).toBeNull();
+    expect(mockStartSession).not.toHaveBeenCalled();
+  });
+
+  it('does not say it while the data on the phone is still being read either', async () => {
+    mockDataLoaded = false;
+    mockCloudAllowed = false;
+    await render(<KeyboardSessionScreen />);
+    expect(screen.getByText('Checking your account…')).toBeTruthy();
+    expect(screen.queryByText('Sign in first')).toBeNull();
+  });
+
+  it('starts the session once the account is there, with no page of sign-in in between', async () => {
+    mockSessionLoaded = false;
+    mockCloudAllowed = false;
+    const view = await render(<KeyboardSessionScreen />);
+    expect(screen.queryByText('Sign in first')).toBeNull();
+    // The sign-in is read: the page looks again by itself
+    mockSessionLoaded = true;
+    mockCloudAllowed = true;
+    await view.rerender(<KeyboardSessionScreen />);
+    expect(screen.queryByText('Sign in first')).toBeNull();
+    expect(mockStartSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('says "Sign in first" only when nobody is signed in', async () => {
+    mockSignedIn = false;
+    mockCloudAllowed = false;
+    await render(<KeyboardSessionScreen />);
+    expect(screen.getByText('Sign in first')).toBeTruthy();
+    expect(mockStartSession).not.toHaveBeenCalled();
+  });
+
+  it("says what is really waiting when someone is signed in but the phone's data belongs to another account", async () => {
+    mockCloudAllowed = false;
+    await render(<KeyboardSessionScreen />);
+    expect(screen.queryByText('Sign in first')).toBeNull();
+    expect(screen.getByText('One question first')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Answer the question'));
+    expect(mockReplace).toHaveBeenCalledWith('/account-switch');
   });
 });
 

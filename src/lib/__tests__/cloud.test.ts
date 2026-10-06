@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { needsRefresh, parseAuthCallback, parseSession } from '../session';
+import { afterRefusal, needsRefresh, parseAuthCallback, parseSession, type Session } from '../session';
 import { cleanTranscript, filterKnownHallucinations } from '../transcript-filter';
 
 describe('sign-in callback', () => {
@@ -65,5 +65,19 @@ describe('transcript cleaning', () => {
 
   it('falls back to the plain text when there are no segments', () => {
     expect(cleanTranscript({ text: '  Hello world  ' })).toBe('Hello world');
+  });
+});
+
+describe('a refresh the server refused (T-0182)', () => {
+  const stored = (refreshToken: string, expiresIn: number): Session => ({ accessToken: 'a', refreshToken, expiresAt: 1_000_000 + expiresIn, userId: 'u', email: '' });
+
+  it('is a sign-out only when the stored sign-in still has the token that was sent', () => {
+    expect(afterRefusal('r1', stored('r1', 3_600_000), 1_000_000)).toEqual({ kind: 'sign-out' });
+    expect(afterRefusal('r1', null, 1_000_000)).toEqual({ kind: 'sign-out' });
+  });
+
+  it('uses a sign-in someone else refreshed, or tries it when it is already due', () => {
+    expect(afterRefusal('r1', stored('r2', 3_600_000), 1_000_000)).toEqual({ kind: 'use', session: stored('r2', 3_600_000) });
+    expect(afterRefusal('r1', stored('r2', 60_000), 1_000_000)).toEqual({ kind: 'retry', session: stored('r2', 60_000) });
   });
 });

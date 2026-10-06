@@ -6,22 +6,32 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Body, Button, MicGlyph, ui } from '@/components/wispra/ui';
 import { Gap, W } from '@/constants/wispra';
 import { useEntries } from '@/lib/entries-store';
-import { minutesLeft, sessionLabel, SPEAK_FLOW } from '@/lib/keyboard-session';
+import { minutesLeft, sessionGate, sessionLabel, SPEAK_FLOW } from '@/lib/keyboard-session';
 import { loadSessionMinutes, setSessionEndedByUser } from '@/lib/storage';
-import { endSession, onSessionState, sessionState, startSession, type SessionState } from '@/modules/wispra-keyboard-bridge';
+import { useSession, useSessionLoaded } from '@/lib/use-session';
+import { endSession, noteKeyboardLog, onSessionState, sessionState, startSession, type SessionState } from '@/modules/wispra-keyboard-bridge';
 
 // Opened by the Wispra keyboard's purple mic when no listening session runs (T-0145). Apple only
 // lets the app, not the keyboard, start the microphone, so the session starts here at once, with
 // the length chosen in Account (T-0163: no choice to make each time), and the screen says one
 // thing: go back to the app you were typing in. Each use of the keyboard's mic keeps it going.
 export default function KeyboardSessionScreen() {
-  const { cloudAllowed } = useEntries();
+  const { cloudAllowed, loaded: dataLoaded } = useEntries();
+  // Look again when the sign-in is read or changes: this screen can open before it is loaded
+  const session = useSession();
+  const sessionLoaded = useSessionLoaded();
   const [state, setState] = useState<SessionState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const started = useRef(false);
   const allowed = cloudAllowed();
+  const gate = sessionGate({ sessionLoaded, dataLoaded, signedIn: session !== null, allowed });
   const minutes = loadSessionMinutes();
+
+  // The keyboard log says what this page decided about the account (never the account itself)
+  useEffect(() => {
+    noteKeyboardLog(`account: the page the keyboard opens: ${gate} (sign-in read: ${sessionLoaded}, data read: ${dataLoaded}, signed in: ${session !== null})`);
+  }, [gate, sessionLoaded, dataLoaded, session]);
 
   useEffect(() => {
     void sessionState().then(setState);
@@ -35,26 +45,52 @@ export default function KeyboardSessionScreen() {
 
   // Opened from the keyboard: the session starts at once
   useEffect(() => {
-    if (started.current || !allowed) return;
+    if (started.current || gate !== 'ready') return;
     started.current = true;
     // Asked for by the keyboard's mic: the session is wanted again
     setSessionEndedByUser(false);
     startSession(minutes)
       .then(setState)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
-  }, [allowed, minutes]);
+  }, [gate, minutes]);
 
   const active = !!state?.active;
   const left = state ? minutesLeft(state.until, now) : 0;
 
-  if (!allowed) {
+  if (gate === 'checking') {
+    // Not "Sign in first": the sign-in is being read
+    return (
+      <SafeAreaView style={[ui.screen, styles.screen]}>
+        <View style={styles.centre}>
+          <Text style={styles.title}>Checking your account…</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (gate === 'choose') {
+    return (
+      <SafeAreaView style={[ui.screen, styles.screen]}>
+        <View style={styles.centre}>
+          <Text style={styles.title}>One question first</Text>
+          <Body style={styles.text}>
+            You are signed in, but the dictations on this phone belong to another account. Answer the question about your accounts,
+            then tap the mic on the keyboard again.
+          </Body>
+          <Button kind="primary" label="Answer the question" onPress={() => router.replace('/account-switch')} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (gate === 'sign-in') {
     return (
       <SafeAreaView style={[ui.screen, styles.screen]}>
         <View style={styles.centre}>
           <Text style={styles.title}>Sign in first</Text>
           <Body style={styles.text}>
-            The Wispra keyboard's mic turns your voice into text with Wispra Cloud. Sign in in Account (or answer the question about
-            your accounts), then tap the mic on the keyboard again.
+            The Wispra keyboard's mic turns your voice into text with Wispra Cloud. Sign in in Account, then tap the mic on the
+            keyboard again.
           </Body>
           <Button kind="primary" label="Open Account" onPress={() => router.replace('/account')} />
         </View>

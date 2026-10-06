@@ -32,6 +32,10 @@ describe('the keyboard log (T-0178)', () => {
     expect(lastFinding(['06/10 06:00:01 app: iOS warned that memory is short (it may close Wispra next)'])?.meaning).toMatch(/memory is short/);
     expect(lastFinding(["06/10 06:00:01 keyboard: listening, but the app's microphone is stopped (microphone used by another app): not recording"])?.meaning).toMatch(/another app has the microphone/);
     expect(lastFinding(['06/10 06:00:01 app: punctuation: timeout in 4001 ms, 12 words'])?.meaning).toMatch(/punctuation step did not answer/);
+    expect(lastFinding(['06/10 06:00:01 app: account: refresh refused (HTTP 400) and nothing newer is stored: signed out'])?.meaning).toMatch(/no sign-in to use/);
+    expect(lastFinding(['06/10 06:00:01 app: account: the saved sign-in could not be read (locked)'])?.meaning).toMatch(/not signed out/);
+    // A sign-in that was read, or refreshed, is no problem
+    expect(lastFinding(['06/10 06:00:01 app: account: read, signed in, token valid for 60 min', '06/10 06:30:00 app: account: token refreshed'])).toBeNull();
     expect(lastFinding(['06/10 06:00:01 keyboard: no words after 45 s (the app beats 3 s ago)'])?.meaning).toMatch(/did not come back in time/);
   });
 

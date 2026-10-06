@@ -79,6 +79,19 @@ export function shouldAutoStartSession(input: AutoStartInput): boolean {
   return input.now - input.keyboardSeenAt < AUTO_START_WINDOW_MS;
 }
 
+// What the page the keyboard's mic opens shows about the account (T-0182). It used to say "Sign in first"
+// from the first frame, before the saved sign-in (read from the keychain) and the data on the phone were
+// loaded, and did not look again when the sign-in arrived: an account that was there looked signed out.
+// 'checking' until both are loaded; 'sign-in' only when no one is signed in; 'choose' when someone is but
+// the phone's data belongs to another account (the question of the two accounts waits).
+export type SessionGate = 'checking' | 'sign-in' | 'choose' | 'ready';
+
+export function sessionGate(input: { sessionLoaded: boolean; dataLoaded: boolean; signedIn: boolean; allowed: boolean }): SessionGate {
+  if (!input.sessionLoaded || !input.dataLoaded) return 'checking';
+  if (!input.signedIn) return 'sign-in';
+  return input.allowed ? 'ready' : 'choose';
+}
+
 export function sessionLabel(minutes: number): string {
   return minutes >= 60 ? `${minutes / 60} hour${minutes === 60 ? '' : 's'}` : `${minutes} min`;
 }

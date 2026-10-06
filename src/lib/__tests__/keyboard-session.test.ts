@@ -8,6 +8,7 @@ import {
   parseSessionMinutes,
   pieceFailed,
   SESSION_CHOICES,
+  sessionGate,
   sessionLabel,
   shouldAutoStartSession,
   wordsFrom,
@@ -80,5 +81,20 @@ describe('the session length', () => {
   it('counts the minutes left, rounded up', () => {
     expect(minutesLeft(1_000_000 + 14 * 60_000 + 1, 1_000_000)).toBe(15);
     expect(minutesLeft(1_000_000, 1_000_001)).toBe(0);
+  });
+});
+
+describe('what the page the keyboard opens says about the account (T-0182)', () => {
+  const base = { sessionLoaded: true, dataLoaded: true, signedIn: true, allowed: true };
+
+  it('is checking, never "sign in", until the saved sign-in and the data are both read', () => {
+    expect(sessionGate({ ...base, sessionLoaded: false, signedIn: false, allowed: false })).toBe('checking');
+    expect(sessionGate({ ...base, dataLoaded: false, allowed: false })).toBe('checking');
+  });
+
+  it('asks to sign in only when no one is signed in, and to answer the question when someone is but the data belongs to another account', () => {
+    expect(sessionGate({ ...base, signedIn: false, allowed: false })).toBe('sign-in');
+    expect(sessionGate({ ...base, allowed: false })).toBe('choose');
+    expect(sessionGate(base)).toBe('ready');
   });
 });

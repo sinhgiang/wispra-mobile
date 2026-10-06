@@ -2,13 +2,20 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 import { cloud } from './cloud-config';
-import { needsRefresh, parseSession, type CallbackTokens, type Session } from './session';
+import { afterRefusal, needsRefresh, parseSession, type CallbackTokens, type Session } from './session';
 import * as NativeDictation from '@/modules/wispra-dictation';
+import { noteKeyboardLog } from '@/modules/wispra-keyboard-bridge';
 
 // Where the sign-in is kept. On Android it is in the app's private storage through the native
 // module, so the mic-button service (which runs without the app's JavaScript) uses the same
 // sign-in. On iPhone it is in the Keychain.
 const SECURE_KEY = 'wispra.session';
+
+// Said in the keyboard log (Account), never the tokens or the address: what the account was doing when the
+// keyboard asked for it (T-0182)
+function note(text: string): void {
+  noteKeyboardLog(`account: ${text}`);
+}
 
 async function readStored(): Promise<Session | null> {
   if (NativeDictation.bubbleSupported) return parseSession(NativeDictation.getSession());
@@ -21,7 +28,9 @@ async function writeStored(session: Session | null): Promise<void> {
     NativeDictation.setSession(json);
     return;
   }
-  if (json) await SecureStore.setItemAsync(SECURE_KEY, json);
+  // After the first unlock, not only while unlocked: the listening session runs with the screen locked, and
+  // a sign-in the keychain refuses to give then looks like a signed-out account
+  if (json) await SecureStore.setItemAsync(SECURE_KEY, json, { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK });
   else await SecureStore.deleteItemAsync(SECURE_KEY);
 }
 
@@ -46,11 +55,27 @@ export function currentSession(): Session | null {
   return current;
 }
 
+// Whether the saved sign-in has been read yet. Until then "no sign-in" only means "not read yet".
+export function sessionLoaded(): boolean {
+  return loaded;
+}
+
 export async function loadSession(): Promise<Session | null> {
   if (NativeDictation.bubbleSupported) NativeDictation.setCloudConfig(cloud.apiBase, cloud.supabaseUrl, cloud.supabasePublishableKey);
-  const session = await readStored();
+  let session: Session | null;
+  try {
+    session = await readStored();
+  } catch (err) {
+    // The keychain would not answer (a phone still locked after a restart, say). That is not "signed out":
+    // nothing is published, and the next use reads it again.
+    note(`the saved sign-in could not be read (${err instanceof Error ? err.message : String(err)})`);
+    return current;
+  }
   loaded = true;
+  note(session ? `read, signed in, token valid for ${Math.max(0, Math.round((session.expiresAt - Date.now()) / 60_000))} min` : 'read, signed out');
   publish(session);
+  // Items saved by earlier builds can only be read while unlocked: save it again as readable after first unlock
+  if (session && !NativeDictation.bubbleSupported) void writeStored(session).catch(() => undefined);
   return session;
 }
 
@@ -79,6 +104,7 @@ export async function signInWithTokens(tokens: CallbackTokens): Promise<Session>
 }
 
 export async function signOut(): Promise<void> {
+  note('signed out');
   await writeStored(null);
   publish(null);
 }
@@ -102,14 +128,31 @@ async function refresh(): Promise<Session | null> {
       body: JSON.stringify({ refresh_token: stored.refreshToken }),
     });
   } catch {
-    // Offline: keep the sign-in, try again later
+    // Offline (or the app was suspended mid-request): keep the sign-in, try again later
+    note('refresh did not get an answer (offline): the sign-in is kept');
     return stored.expiresAt > Date.now() ? stored : null;
   }
   if (response.status === 400 || response.status === 401) {
+    // Not always "signed out": the sign-in may have been refreshed meanwhile by another side
+    const refusal = afterRefusal(stored.refreshToken, await readStored().catch(() => null));
+    if (refusal.kind === 'use') {
+      note(`refresh refused (HTTP ${response.status}) but the sign-in was refreshed meanwhile: used`);
+      publish(refusal.session);
+      return refusal.session;
+    }
+    if (refusal.kind === 'retry') {
+      note(`refresh refused (HTTP ${response.status}) but a newer sign-in is stored: trying it`);
+      return refresh();
+    }
+    note(`refresh refused (HTTP ${response.status}) and nothing newer is stored: signed out`);
     await signOut();
     return null;
   }
-  if (!response.ok) return stored.expiresAt > Date.now() ? stored : null;
+  if (!response.ok) {
+    note(`refresh failed (HTTP ${response.status}): the sign-in is kept`);
+    return stored.expiresAt > Date.now() ? stored : null;
+  }
+  note('token refreshed');
   const data = (await response.json()) as { access_token: string; refresh_token: string; expires_in: number };
   const next: Session = {
     ...stored,
