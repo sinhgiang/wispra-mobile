@@ -184,6 +184,9 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     // The words of this utterance never come: after the wait the keyboard says so (45 s on the
     // phone, 1 s here) instead of "Đang viết…" forever
     KeyboardViewController.wordsWaitSeconds = 1
+    // The app's beat is fresh here (a slow machine may have let the first one grow old, and then the keyboard
+    // would rightly say the app stopped, which is another case, tested below)
+    SharedChannel.write(.session, session(beatAgoMs: 0))
     mic?.sendActions(for: .touchUpInside)
     check(mic?.accessibilityLabel == "Speak with Wispra", "tapped again: purple, waiting for the words")
     check(labels(in: keyboard.view).contains("Đang viết…"), "it says the words are being written")
