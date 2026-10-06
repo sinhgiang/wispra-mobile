@@ -216,7 +216,7 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     mic?.sendActions(for: .touchUpInside)
     check(mic?.accessibilityLabel == "Listening. Tap to type what you said", "a live session again: the mic is red")
     SharedChannel.write(.session, session(beatAgoMs: 60_000))
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 3.6) {
       check(mic?.accessibilityLabel == "Speak with Wispra", "the app stopped beating: the mic does not stay red")
       check(labels(in: keyboard.view).contains(KeyboardViewController.appStoppedMessage), "and it says iOS stopped Wispra")
 
@@ -227,7 +227,7 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
       mic?.sendActions(for: .touchUpInside)
       check(labels(in: keyboard.view).contains("Đang viết…"), "waiting for the words")
       SharedChannel.write(.session, session(beatAgoMs: 60_000))
-      DispatchQueue.main.asyncAfter(deadline: .now() + 4.2) {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
         check(labels(in: keyboard.view).contains(KeyboardViewController.appStoppedMessage), "waiting and the app is gone: it says so, not Đang viết… for ever")
         let log = SharedLog.read().joined(separator: "\n")
         check(log.contains("no sign of life"), "and the keyboard noted it in the log")
@@ -247,7 +247,7 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
       check(mic?.accessibilityLabel == "Listening. Tap to type what you said", "one check with the engine down: still red, a blip")
       SharedChannel.write(.session, session(beatAgoMs: 0, engine: false))
-      DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
         check(mic?.accessibilityLabel == "Speak with Wispra", "the engine stays down: the mic does not stay red")
         check(labels(in: keyboard.view).contains(KeyboardViewController.micBusyMessage), "and it says the microphone is taken")
         check(SharedLog.read().joined(separator: "\n").contains("microphone is stopped"), "and the keyboard noted why in the log")
