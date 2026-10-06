@@ -150,7 +150,7 @@ struct KeyboardTests {
   }
 
   static func sharedLog() {
-    let old = (0..<SharedLog.maxLines).map { "l($0)" }
+    let old = (0..<SharedLog.maxLines).map { "l\($0)" }
     let next = SharedLog.appended(to: old, "new")
     check("the log keeps the newest lines", next.count == SharedLog.maxLines && next.last == "new" && next.first == "l1")
     check("the log reads back what it wrote", SharedLog.parse(SharedLog.serialize(["a", "b: c"])) == ["a", "b: c"])
