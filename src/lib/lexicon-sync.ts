@@ -78,6 +78,16 @@ const byKey = <T>(list: readonly T[], key: (t: T) => string): Map<string, T> => 
   return map;
 };
 
+// The cloud suddenly lacking most of what it had at the last sync (a server fault, or another device writing
+// an empty list) is not the person deleting words: the deletions it implies are not carried out here, the words
+// stay and go back up (T-0193 review). A handful of words is too few to tell, so the rule starts at 4.
+export const MASS_DELETE_MIN = 4;
+
+export function looksLikeMassDelete(snapshot: readonly unknown[] | null, cloudKeysLeft: number): boolean {
+  if (!snapshot || snapshot.length < MASS_DELETE_MIN) return false;
+  return (snapshot.length - cloudKeysLeft) * 2 > snapshot.length;
+}
+
 // Three sides: here, the cloud, and what was there at the last sync (null: never synced). Returns, in the order
 // the cloud has them and then what is only here, the keys that stay, with each side's item.
 function threeWay<T>(
@@ -90,6 +100,9 @@ function threeWay<T>(
   const l = byKey(local, key);
   const c = byKey(cloud, key);
   const s = snapshot ? byKey(snapshot, key) : null;
+  // How many of the snapshot's words the cloud still has: too few means the cloud's list cannot be trusted
+  const stillThere = s ? [...s.keys()].filter((k) => c.has(k)).length : 0;
+  const trustCloudDeletes = !looksLikeMassDelete(s ? [...s.keys()] : null, stillThere);
   const order = [...c.keys(), ...[...l.keys()].filter((k) => !c.has(k))];
   const out: Keyed<{ local?: T; cloud?: T; was?: T }>[] = [];
   for (const k of order) {
@@ -99,7 +112,7 @@ function threeWay<T>(
     // Gone here since the last sync: deleted here, unless the cloud's has changed since (the newest wins)
     const deletedHere = !!s && !!was && !here && !!there && !changed(there, was);
     // Gone from the cloud since the last sync: deleted there, unless it was changed here since
-    const deletedThere = !!s && !!was && !there && !!here && !changed(here, was);
+    const deletedThere = trustCloudDeletes && !!s && !!was && !there && !!here && !changed(here, was);
     if (deletedHere || deletedThere) continue;
     out.push({ key: k, item: { local: here, cloud: there, was } });
   }
@@ -232,6 +245,8 @@ export interface SyncOutcome {
   wrote: { vocabulary: boolean; lexicon: boolean };
   // What changed here
   changedHere: { vocabulary: boolean; lexicon: boolean };
+  // The cloud lacked most of its words since the last sync: its deletions were not carried out here
+  heldBack: boolean;
   // A list the cloud could not take; the other was still synced
   skipped?: string;
 }
@@ -254,8 +269,11 @@ export async function syncLists(input: SyncInput): Promise<SyncOutcome> {
       wrote.vocabulary = true;
       storedVocabulary = vocabulary;
     } catch (err) {
-      // The server has no table for the vocabulary yet (503): the learned words still go
-      if (err instanceof Error && (err as { status?: number }).status === 503) skipped = 'vocabulary';
+      // The server cannot take the vocabulary (no table yet, 503; or it refused the list as it is, a 4xx other
+      // than the sign-in): the learned words still go, and the person is told
+      const status = (err as { status?: number }).status;
+      const refused = typeof status === 'number' && (status === 503 || (status >= 400 && status < 500 && status !== 401 && status !== 403));
+      if (err instanceof Error && refused) skipped = 'vocabulary';
       else throw err;
     }
   }
@@ -270,8 +288,17 @@ export async function syncLists(input: SyncInput): Promise<SyncOutcome> {
     snapshot: { userId: input.userId, at: input.now, vocabulary: storedVocabulary, lexicon: storedLexicon },
     wrote,
     changedHere: { vocabulary: !sameVocabulary(vocabulary, input.local.vocabulary), lexicon: !sameLexicon(lexicon, input.local.lexicon) },
+    heldBack: heldBack(snapshot, cloud),
     ...(skipped ? { skipped } : {}),
   };
+}
+
+function heldBack(snapshot: SyncSnapshot | null, cloud: CloudLists): boolean {
+  if (!snapshot) return false;
+  const had = (list: readonly string[], now: readonly string[]) => looksLikeMassDelete(list, list.filter((k) => now.includes(k)).length);
+  const terms = (xs: readonly string[]) => xs.map(normKey);
+  const lexicon = (xs: readonly LexiconEntry[]) => xs.map((e) => normKey(e.term));
+  return had(terms(snapshot.vocabulary), terms(cloud.vocabulary)) || had(lexicon(snapshot.lexicon), lexicon(cloud.lexicon));
 }
 
 export function parseSnapshot(json: string | null | undefined): SyncSnapshot | null {

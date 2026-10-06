@@ -62,6 +62,8 @@ describe('the list', () => {
     expect(addTerms(['Github'], 'github, Git Hub, Capcut')).toEqual(['Github', 'Capcut']);
     expect(addTerms(['Nguyễn Văn A'], 'Nguyen Van A')).toEqual(['Nguyễn Văn A']);
     expect(removeTerm(['a', 'b'], 'a')).toEqual(['b']);
+    // A pasted sentence is not a term: left out, so the list can still be shared (Wispra Cloud takes 200 characters)
+    expect(addTerms([], `Github, ${'x'.repeat(201)}, ${'y'.repeat(200)}`)).toEqual(['Github', 'y'.repeat(200)]);
   });
 
   it('reads the saved file, skipping what is not a term', () => {

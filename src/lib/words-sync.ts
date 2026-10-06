@@ -98,7 +98,7 @@ export async function runWordsSync(deps: WordsDeps): Promise<WordsResult> {
     deps.note(
       `words sync: ${outcome.vocabulary.length} vocabulary terms, ${outcome.lexicon.length} learned words` +
         `${outcome.wrote.vocabulary || outcome.wrote.lexicon ? ', sent to the cloud' : ''}${changedHere ? ', brought in from the cloud' : ''}` +
-        `${outcome.skipped ? `, the cloud cannot take the ${outcome.skipped} yet` : ''}${raced ? ', changed meanwhile: run again' : ''}`,
+        `${outcome.skipped ? `, the cloud cannot take the ${outcome.skipped} yet` : ''}${outcome.heldBack ? ', the cloud lacked most of its words: its deletions were not carried out' : ''}${raced ? ', changed meanwhile: run again' : ''}`,
     );
     return {
       ok: true,

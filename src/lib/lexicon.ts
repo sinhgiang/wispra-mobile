@@ -374,16 +374,35 @@ export interface LexiconPatch {
   heardAs?: string[];
 }
 
-export function updateEntry(current: LexiconEntry[], id: string, patch: LexiconPatch): LexiconEntry[] {
+// A change the person makes (Pin, Turn off, taking off a wrong form) is the newest thing that happened to the
+// word, so it dates the word: `lastSeen` is what the sync uses to let the newest entry win, and without it the
+// copy on Wispra Cloud, equally old, would put the change back (T-0193 review). Only a change that really
+// changes something dates it.
+export function updateEntry(current: LexiconEntry[], id: string, patch: LexiconPatch, now: string = new Date().toISOString()): LexiconEntry[] {
   const list = clone(current);
   const entry = list.find((e) => e.id === id);
   if (!entry) return current;
-  if (typeof patch.enabled === 'boolean') entry.enabled = patch.enabled;
-  if (typeof patch.pinned === 'boolean') entry.pinned = patch.pinned;
+  let changed = false;
+  if (typeof patch.enabled === 'boolean' && patch.enabled !== entry.enabled) {
+    entry.enabled = patch.enabled;
+    changed = true;
+  }
+  if (typeof patch.pinned === 'boolean' && patch.pinned !== entry.pinned) {
+    entry.pinned = patch.pinned;
+    changed = true;
+  }
   if (Array.isArray(patch.heardAs)) {
     const keep = new Set(patch.heardAs.map(normKey));
-    entry.heardAs = entry.heardAs.filter((h) => keep.has(normKey(h)));
+    const kept = entry.heardAs.filter((h) => keep.has(normKey(h)));
+    if (kept.length !== entry.heardAs.length) {
+      entry.heardAs = kept;
+      changed = true;
+    }
   }
+  if (!changed) return current;
+  // Never earlier than what it had (a clock that is behind must not make the change lose)
+  if (Date.parse(now) > Date.parse(entry.lastSeen) || Number.isNaN(Date.parse(entry.lastSeen))) entry.lastSeen = now;
+  else entry.lastSeen = new Date(Date.parse(entry.lastSeen) + 1).toISOString();
   return list;
 }
 

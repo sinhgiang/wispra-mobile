@@ -151,11 +151,15 @@ export function spellVocabulary(text: string, vocabulary: string[]): string {
 // What is typed in the "Add a word or phrase…" field becomes terms. The computer adds one term per Add; a
 // pasted list ("Github, Capcut, Timio") or lines becomes several (the owner pastes lists). A term already in
 // the list (same letters) is not added twice.
+// The most a term may have (Wispra Cloud takes at most 200 characters; a term longer than a name or a phrase is
+// a pasted sentence, and is left out rather than stopping the vocabulary from being shared)
+export const MAX_TERM_CHARS = 200;
+
 export function addTerms(list: string[], input: string): string[] {
   const parts = input
     .split(/[,;\n]/)
     .map((p) => p.trim())
-    .filter(Boolean);
+    .filter((p) => p !== '' && p.length <= MAX_TERM_CHARS);
   const out = [...list];
   // The same letters once spaces, hyphens, case and accents are set aside ("github", "Git Hub") count as the same term
   const keys = new Set(out.map(spellingKey));
