@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Body, Button, Card, Title, ui } from '@/components/wispra/ui';
+import { WordsSyncLine } from '@/components/wispra/words-sync-line';
 import { Gap, W } from '@/constants/wispra';
 import { loadVocabulary, saveVocabulary } from '@/lib/storage';
 import { addTerms, removeTerm } from '@/lib/vocabulary';
@@ -40,6 +41,7 @@ export default function VocabularyScreen() {
         <Button small label="‹ Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/account'))} />
         <Title>Custom vocabulary</Title>
         <Body style={styles.hint}>{VOCABULARY_HINT}</Body>
+        <WordsSyncLine />
 
         <View style={styles.addRow}>
           <TextInput

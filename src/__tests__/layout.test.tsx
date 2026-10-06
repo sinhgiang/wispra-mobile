@@ -27,6 +27,7 @@ jest.mock('expo-splash-screen', () => ({ preventAutoHideAsync: jest.fn(), hideAs
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 jest.mock('@/lib/cloud-auth', () => ({ loadSession: jest.fn(async () => undefined) }));
 jest.mock('@/components/wispra/keyboard-session-bridge', () => ({ KeyboardSessionBridge: () => null }));
+jest.mock('@/components/wispra/words-sync', () => ({ WordsSync: () => null }));
 jest.mock('@/lib/entries-store', () => ({
   EntriesProvider: ({ children }: { children: React.ReactNode }) => children,
   useEntries: () => ({ loaded: false, accountChoice: null }),

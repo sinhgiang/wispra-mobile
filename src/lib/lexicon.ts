@@ -144,7 +144,7 @@ function clone(list: LexiconEntry[]): LexiconEntry[] {
 }
 
 // Over the limit, the least confirmed and oldest unpinned entries go first
-function cap(list: LexiconEntry[]): LexiconEntry[] {
+export function cap(list: LexiconEntry[]): LexiconEntry[] {
   if (list.length <= MAX_LEXICON_ENTRIES) return list;
   const dropOrder = list
     .map((e, index) => ({ e, index }))

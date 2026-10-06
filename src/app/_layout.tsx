@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { W } from '@/constants/wispra';
 import { loadSession } from '@/lib/cloud-auth';
 import { KeyboardSessionBridge } from '@/components/wispra/keyboard-session-bridge';
+import { WordsSync } from '@/components/wispra/words-sync';
 import { EntriesProvider, useEntries } from '@/lib/entries-store';
 import { shouldShowGuide } from '@/lib/setup-guide';
 import { STACK_SCREEN_OPTIONS } from '@/lib/stack-options';
@@ -79,6 +80,7 @@ export default function RootLayout() {
         <AskAccountChoice />
         <OpenGuideOnce />
         <KeyboardSessionBridge />
+        <WordsSync />
         <StatusBar style="light" />
         <Stack screenOptions={STACK_SCREEN_OPTIONS}>
           <Stack.Screen name="(tabs)" />

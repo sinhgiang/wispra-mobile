@@ -9,6 +9,8 @@ import { parseDeletionBook, serializeDeletionBook, type DeletionBook } from './h
 import { parseLearning, serializeLearning, type LearningSettings, DEFAULT_LEARNING } from './learning';
 import { parseLexicon, serializeLexicon, type LexiconEntry } from './lexicon';
 import { parseVocabulary } from './vocabulary';
+import { markWordsChanged } from './lexicon-dirty';
+import { parseSnapshot, type SyncSnapshot } from './lexicon-sync';
 import { EMPTY_STATE, parseLearnedState, serializeLearnedState, type LearnedState } from './learned/learned';
 
 // Everything lives in the app's document directory, which the system never clears on its own
@@ -88,13 +90,15 @@ export function loadLexicon(): LexiconEntry[] {
   }
 }
 
-export function saveLexicon(entries: LexiconEntry[]): void {
+// `quiet`: saved by the sync itself, which must not call for another sync
+export function saveLexicon(entries: LexiconEntry[], quiet = false): void {
   ensureDirs();
   const tmp = new File(root, 'lexicon.json.tmp');
   if (tmp.exists) tmp.delete();
   tmp.create();
   tmp.write(serializeLexicon(entries));
   tmp.moveSync(new File(root, 'lexicon.json'), { overwrite: true });
+  if (!quiet) markWordsChanged();
 }
 
 // The Custom vocabulary: names and terms to spell exactly (see vocabulary.ts)
@@ -107,13 +111,38 @@ export function loadVocabulary(): string[] {
   }
 }
 
-export function saveVocabulary(terms: string[]): void {
+export function saveVocabulary(terms: string[], quiet = false): void {
   ensureDirs();
   const tmp = new File(root, 'vocabulary.json.tmp');
   if (tmp.exists) tmp.delete();
   tmp.create();
   tmp.write(JSON.stringify(terms));
   tmp.moveSync(new File(root, 'vocabulary.json'), { overwrite: true });
+  if (!quiet) markWordsChanged();
+}
+
+// What the two lists were at the last sync with Wispra Cloud, and for which account (see lexicon-sync.ts)
+export function loadWordsSnapshot(): SyncSnapshot | null {
+  try {
+    const file = new File(root, 'words-sync.json');
+    return file.exists ? parseSnapshot(file.textSync()) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveWordsSnapshot(snapshot: SyncSnapshot | null): void {
+  ensureDirs();
+  if (snapshot === null) {
+    const file = new File(root, 'words-sync.json');
+    if (file.exists) file.delete();
+    return;
+  }
+  const tmp = new File(root, 'words-sync.json.tmp');
+  if (tmp.exists) tmp.delete();
+  tmp.create();
+  tmp.write(JSON.stringify(snapshot));
+  tmp.moveSync(new File(root, 'words-sync.json'), { overwrite: true });
 }
 
 // What the Learned section remembers: words waved away, the writing style notes, picked-up words, statistics
