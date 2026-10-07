@@ -52,6 +52,11 @@
     "test": "jest",
     "typecheck": "tsc --noEmit"
   },
+  "overrides": {
+    "@bacons/xcode": {
+      "@xmldom/xmldom": "^0.8.15"
+    }
+  },
   "private": true,
   "jest": {
     "preset": "jest-expo",
