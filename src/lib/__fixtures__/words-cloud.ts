@@ -76,8 +76,26 @@ export class Device {
   allowed = true;
   token: string | null = 'good';
   clock = '2026-10-07T02:00:00.000Z';
+  // Moves when the person saves, the same signal as storage.ts. A reread can still miss that save.
+  revision = 0;
+  // How many of the next reads return the lists from before the latest edit
+  staleReads = 0;
+  private frozen: { vocabulary: string[]; lexicon: LexiconEntry[] } | null = null;
   // Runs while the sync waits for the network
   duringSync: (() => void) | null = null;
+
+  private copyLists(): { vocabulary: string[]; lexicon: LexiconEntry[] } {
+    return {
+      vocabulary: [...this.vocabulary],
+      lexicon: this.lexicon.map((e) => ({ ...e, heardAs: [...e.heardAs] })),
+    };
+  }
+
+  // The next `count` reads return the lists as they are now, then the live ones again
+  armStaleRead(count = 1): void {
+    this.frozen = this.copyLists();
+    this.staleReads = count;
+  }
 
   constructor(private cloud: FakeCloud) {}
 
@@ -92,7 +110,17 @@ export class Device {
         hook?.();
         return answer;
       },
-      loadLocal: () => ({ vocabulary: [...this.vocabulary], lexicon: this.lexicon.map((e) => ({ ...e, heardAs: [...e.heardAs] })) }),
+      loadLocal: () => {
+        if (this.staleReads > 0 && this.frozen) {
+          this.staleReads -= 1;
+          return {
+            vocabulary: [...this.frozen.vocabulary],
+            lexicon: this.frozen.lexicon.map((e) => ({ ...e, heardAs: [...e.heardAs] })),
+          };
+        }
+        return this.copyLists();
+      },
+      revision: () => this.revision,
       saveVocabulary: (terms) => {
         this.vocabulary = terms;
       },

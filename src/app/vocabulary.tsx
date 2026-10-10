@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,6 +8,7 @@ import { WordsSyncLine } from '@/components/wispra/words-sync-line';
 import { Gap, W } from '@/constants/wispra';
 import { loadVocabulary, saveVocabulary } from '@/lib/storage';
 import { addTerms, removeTerm } from '@/lib/vocabulary';
+import { useWordsSyncStatus } from '@/lib/words-sync-store';
 
 // The computer's words, on this screen too (Settings › Dictate › Custom vocabulary there)
 export const VOCABULARY_HINT =
@@ -20,6 +21,11 @@ export default function VocabularyScreen() {
   const [terms, setTerms] = useState<string[]>(() => loadVocabulary());
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const status = useWordsSyncStatus();
+  // A sync writes the file quietly. Show that list, including a word that arrived from the computer.
+  useEffect(() => {
+    setTerms(loadVocabulary());
+  }, [status.at]);
 
   const change = (next: string[]) => {
     try {
@@ -41,7 +47,13 @@ export default function VocabularyScreen() {
         <Button small label="‹ Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/account'))} />
         <Title>Custom vocabulary</Title>
         <Body style={styles.hint}>{VOCABULARY_HINT}</Body>
-        <WordsSyncLine />
+        <WordsSyncLine
+          beforeSync={() => {
+            if (!input.trim()) return;
+            change(addTerms(terms, input));
+            setInput('');
+          }}
+        />
 
         <View style={styles.addRow}>
           <TextInput

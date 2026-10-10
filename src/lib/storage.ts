@@ -16,6 +16,14 @@ import { EMPTY_STATE, parseLearnedState, serializeLearnedState, type LearnedStat
 // Everything lives in the app's document directory, which the system never clears on its own
 // (unlike the cache directory).
 const root = new Directory(Paths.document, 'wispra');
+
+// Moves when the person saves a word list. A sync compares this, not only a reread of the file: the reread
+// can still show the list from before the save, and the sync must not write the cloud's list back over it.
+let wordsRevision = 0;
+
+export function wordsRevisionNow(): number {
+  return wordsRevision;
+}
 const audioDir = new Directory(root, 'audio');
 const entriesFile = new File(root, 'entries.json');
 const entriesTmp = new File(root, 'entries.json.tmp');
@@ -98,7 +106,10 @@ export function saveLexicon(entries: LexiconEntry[], quiet = false): void {
   tmp.create();
   tmp.write(serializeLexicon(entries));
   tmp.moveSync(new File(root, 'lexicon.json'), { overwrite: true });
-  if (!quiet) markWordsChanged();
+  if (!quiet) {
+    wordsRevision += 1;
+    markWordsChanged();
+  }
 }
 
 // The Custom vocabulary: names and terms to spell exactly (see vocabulary.ts)
@@ -118,7 +129,10 @@ export function saveVocabulary(terms: string[], quiet = false): void {
   tmp.create();
   tmp.write(JSON.stringify(terms));
   tmp.moveSync(new File(root, 'vocabulary.json'), { overwrite: true });
-  if (!quiet) markWordsChanged();
+  if (!quiet) {
+    wordsRevision += 1;
+    markWordsChanged();
+  }
 }
 
 // What the two lists were at the last sync with Wispra Cloud, and for which account (see lexicon-sync.ts)
