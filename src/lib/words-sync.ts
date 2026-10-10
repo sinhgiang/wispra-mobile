@@ -22,6 +22,8 @@ export interface WordsDeps {
   // GET and PUT of /api/lexicon: the status and the parsed JSON body
   request(method: 'GET' | 'PUT', token: string, body?: unknown): Promise<{ status: number; json: unknown }>;
   loadLocal(): CloudLists;
+  // Moves when the person saves a list. A reread can still show the list from before that save.
+  revision(): number;
   saveVocabulary(terms: string[]): void;
   saveLexicon(entries: LexiconEntry[]): void;
   loadSnapshot(): SyncSnapshot | null;
@@ -80,13 +82,17 @@ export async function runWordsSync(deps: WordsDeps): Promise<WordsResult> {
   try {
     const token = await deps.token();
     if (!token) return { ok: false, reason: 'signed-out', message: 'Sign in to Wispra Cloud in Account to share your words.' };
+    const revision = deps.revision();
     const local = deps.loadLocal();
     const outcome = await syncLists({ userId: account.userId, local, snapshot: deps.loadSnapshot(), now: deps.now(), io: ioFor(deps, token) });
 
-    // The person may have changed a list while the network was busy: their change is not overwritten, and the
-    // next run (called for by that change) merges it
+    // The person may have changed a list while the network was busy. Comparing the reread is not enough: that
+    // reread can still be the list from before the save. The run then sends nothing, and when the merge differs
+    // it writes that merge back over the edit. The revision moves on the save itself, so the edit is kept and
+    // the next run merges it.
     const nowLocal = deps.loadLocal();
-    const raced = !sameVocabulary(nowLocal.vocabulary, local.vocabulary) || !sameLexicon(nowLocal.lexicon, local.lexicon);
+    const raced =
+      deps.revision() !== revision || !sameVocabulary(nowLocal.vocabulary, local.vocabulary) || !sameLexicon(nowLocal.lexicon, local.lexicon);
     if (!raced) {
       if (outcome.changedHere.vocabulary) deps.saveVocabulary(outcome.vocabulary);
       if (outcome.changedHere.lexicon) deps.saveLexicon(outcome.lexicon);

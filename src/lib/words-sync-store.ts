@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react';
 
 import { validToken } from './cloud-auth';
 import { cloud } from './cloud-config';
-import { loadLexicon, loadVocabulary, loadWordsSnapshot, saveLexicon, saveVocabulary, saveWordsSnapshot } from './storage';
+import { loadLexicon, loadVocabulary, loadWordsSnapshot, saveLexicon, saveVocabulary, saveWordsSnapshot, wordsRevisionNow } from './storage';
 import { runWordsSync, type WordsDeps, type WordsResult } from './words-sync';
 import { noteKeyboardLog } from '@/modules/wispra-keyboard-bridge';
 
@@ -74,6 +74,7 @@ function realDeps(account: Account): WordsDeps {
     token: validToken,
     request,
     loadLocal: () => ({ vocabulary: loadVocabulary(), lexicon: loadLexicon() }),
+    revision: wordsRevisionNow,
     saveVocabulary: (terms) => saveVocabulary(terms, true),
     saveLexicon: (entries) => saveLexicon(entries, true),
     loadSnapshot: loadWordsSnapshot,

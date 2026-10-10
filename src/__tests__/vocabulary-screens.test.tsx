@@ -17,10 +17,19 @@ let mockLexicon: LexiconEntry[] = [];
 let mockLearning: LearningSettings = { learning: true, autoLearn: true };
 let mockLearned: LearnedState = EMPTY_STATE;
 let mockEntries: Entry[] = [];
+let mockSession: { userId: string } | null = null;
+let mockCloudAllowed = false;
 
 jest.mock('react-native-safe-area-context', () => (jest.requireActual('react-native-safe-area-context/jest/mock') as { default: object }).default);
 jest.mock('expo-router', () => ({ router: { back: jest.fn(), canGoBack: () => true, replace: jest.fn(), push: jest.fn() } }));
-jest.mock('@/lib/entries-store', () => ({ useEntries: () => ({ entries: mockEntries }) }));
+jest.mock('@/lib/entries-store', () => ({
+  useEntries: () => ({ entries: mockEntries, cloudAllowed: () => mockCloudAllowed }),
+}));
+jest.mock('@/lib/use-session', () => ({ useSession: () => mockSession }));
+jest.mock('@/lib/words-sync-store', () => ({
+  syncWords: jest.fn(async () => null),
+  useWordsSyncStatus: () => ({ at: null, note: null, running: false }),
+}));
 jest.mock('@/lib/storage', () => ({
   loadLearned: () => ({ ...mockLearned }),
   saveLearned: (s: LearnedState) => {
@@ -44,6 +53,7 @@ jest.mock('@/lib/storage', () => ({
 import LearnedScreen, { ADD_NOTE, AUTO_EMPTY, EVAL_EMPTY, LEARNED_EMPTY, STYLE_EMPTY } from '@/app/learned';
 // eslint-disable-next-line import/first
 import VocabularyScreen, { VOCABULARY_EMPTY } from '@/app/vocabulary';
+import { syncWords } from '@/lib/words-sync-store';
 
 const entry = (term: string, heardAs: string[], over: Partial<LexiconEntry> = {}): LexiconEntry => ({
   id: `id-${term}`,
@@ -64,6 +74,9 @@ beforeEach(() => {
   mockLearning = { learning: true, autoLearn: true };
   mockLearned = EMPTY_STATE;
   mockEntries = [];
+  mockSession = null;
+  mockCloudAllowed = false;
+  (syncWords as unknown as { mockClear(): void }).mockClear();
 });
 
 describe('Custom vocabulary', () => {
@@ -87,6 +100,17 @@ describe('Custom vocabulary', () => {
     );
     await fireEvent.press(screen.getByText('Add'));
     expect(mockVocabulary).toEqual(['Github', 'Capcut', 'Timio', 'Wispra', 'TikTok', 'Facebook', 'MCP', 'claude', 'push', 'Helme', 'commit', 'Lenvid', 'Agent', 'Dictate']);
+  });
+
+  it('Sync now saves the word still in the field, so the sync reads it', async () => {
+    mockSession = { userId: 'u1' };
+    mockCloudAllowed = true;
+    mockVocabulary = ['Capcut'];
+    await render(<VocabularyScreen />);
+    await fireEvent.changeText(screen.getByLabelText('Add a word or phrase'), 'ZzThuNghiem');
+    await fireEvent.press(screen.getByText('Sync now'));
+    expect(mockVocabulary).toEqual(['Capcut', 'ZzThuNghiem']);
+    expect(syncWords).toHaveBeenCalled();
   });
 
   it('shows what is saved when it opens, and Add is off for an empty field', async () => {

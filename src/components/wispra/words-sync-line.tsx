@@ -11,12 +11,17 @@ import { syncWords, useWordsSyncStatus } from '@/lib/words-sync-store';
 
 // What the Custom vocabulary and Learned screens say about sharing the words with Wispra on the computer
 // (T-0193), and a button to do it now.
-export function WordsSyncLine() {
+export function WordsSyncLine({ beforeSync }: { beforeSync?: () => void }) {
   const { cloudAllowed } = useEntries();
   const session = useSession();
   const status = useWordsSyncStatus();
   const allowed = session !== null && cloudAllowed();
-  const now = () => void syncWords(() => (allowed && currentSession() ? { userId: currentSession()?.userId ?? '' } : null));
+  const now = () => {
+    // The word still in the field is not in the file yet. Save it before the sync reads the file, or Sync now
+    // sends the list from before it and the other device never sees it.
+    beforeSync?.();
+    void syncWords(() => (allowed && currentSession() ? { userId: currentSession()?.userId ?? '' } : null));
+  };
 
   let text: string;
   if (!session) text = 'Sign in to Wispra Cloud in Account to share these words with Wispra on your computer.';

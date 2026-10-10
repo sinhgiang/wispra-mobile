@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from '@jest/globals';
 
 import type { LexiconEntry } from '../lexicon';
 import { mergeLexicon, mergeVocabulary, parseCloudLists } from '../lexicon-sync';
+import { syncWords } from '../words-sync-store';
 import { Device, FakeCloud, entry } from '../__fixtures__/words-cloud';
 
 let cloud: FakeCloud;
@@ -233,6 +234,38 @@ describe('writing only what changed, and never losing the lists', () => {
     expect(result.ok).toBe(true);
     expect(Object.keys(cloud.lexicon).length).toBeLessThanOrEqual(500);
     expect(cloud.requests.every((r) => r.method === 'GET' || (r.body as object) !== undefined)).toBe(true);
+  });
+
+  it('a save the reread missed is not overwritten, and that same sync sends it', async () => {
+    cloud.vocabulary = ['Github'];
+    phone.vocabulary = ['Github'];
+    await phone.sync();
+    const puts = cloud.puts;
+    phone.duringSync = () => {
+      // The file already has the new word, but the reread still returns the list from before the save
+      phone.armStaleRead();
+      phone.vocabulary = ['ZzThuNghiem', 'Github'];
+      phone.revision += 1;
+    };
+    const result = await syncWords(() => ({ userId: phone.userId }), phone.deps());
+    expect(result).toMatchObject({ ok: true, raced: false, wrote: { vocabulary: true } });
+    expect(phone.vocabulary).toEqual(['Github', 'ZzThuNghiem']);
+    expect(cloud.vocabulary).toEqual(['Github', 'ZzThuNghiem']);
+    expect(cloud.puts).toBe(puts + 1);
+  });
+
+  it('a deletion the reread missed does not come back, and that same sync removes it from the cloud', async () => {
+    cloud.vocabulary = ['Github', 'Capcut'];
+    phone.vocabulary = ['Github', 'Capcut'];
+    await phone.sync();
+    phone.duringSync = () => {
+      phone.armStaleRead();
+      phone.vocabulary = ['Capcut'];
+      phone.revision += 1;
+    };
+    await syncWords(() => ({ userId: phone.userId }), phone.deps());
+    expect(phone.vocabulary).toEqual(['Capcut']);
+    expect(cloud.vocabulary).toEqual(['Capcut']);
   });
 
   it('a change made while the network was busy is not overwritten, and the next run merges it', async () => {

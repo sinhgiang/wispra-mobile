@@ -158,6 +158,7 @@ describe('one run at a time', () => {
       },
       request: async () => ({ status: 200, json: { vocabulary: { terms: [], updatedAt: null }, lexicon: [] } }),
       loadLocal: () => ({ vocabulary: [], lexicon: [] }),
+      revision: () => 0,
       saveVocabulary: () => undefined,
       saveLexicon: () => undefined,
       loadSnapshot: () => null,
