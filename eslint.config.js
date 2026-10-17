@@ -8,15 +8,13 @@ module.exports = defineConfig([
     ignores: ["dist/*"],
   },
   {
-    // Rules that the code written before CI broke 21 times (T-0555). They stay visible as warnings
-    // so the pull request check is not red from the first day; a follow-up ticket fixes the spots
-    // and raises them back to "error". Every other rule of eslint-config-expo still fails the check.
+    // The five rules the code broke 21 times when CI began (T-0555) were fixed in T-0563: they fail the check.
     rules: {
-      "react-hooks/globals": "warn",
-      "react-hooks/purity": "warn",
-      "react-hooks/refs": "warn",
-      "react-hooks/set-state-in-effect": "warn",
-      "react/no-unescaped-entities": "warn",
+      "react-hooks/globals": "error",
+      "react-hooks/purity": "error",
+      "react-hooks/refs": "error",
+      "react-hooks/set-state-in-effect": "error",
+      "react/no-unescaped-entities": "error",
     },
   },
 ]);

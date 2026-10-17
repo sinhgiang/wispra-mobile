@@ -4,6 +4,7 @@
 // word twice, then dictate again, and the word comes out as it was fixed.
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { useEffect } from 'react';
 
 import type { Entry } from '@/lib/entries';
 import type { LexiconEntry } from '@/lib/lexicon';
@@ -103,7 +104,10 @@ const entry = (text: string, over: Partial<Entry> = {}): Entry => ({
 
 let api: ReturnType<typeof useEntries> | null = null;
 function Probe() {
-  api = useEntries();
+  const value = useEntries();
+  useEffect(() => {
+    api = value;
+  });
   return null;
 }
 

@@ -23,13 +23,16 @@ export default function KeyboardSessionScreen() {
   const sessionLoaded = useSessionLoaded();
   const [state, setState] = useState<SessionState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const started = useRef(false);
   const allowed = cloudAllowed();
   // How long the account has been waited for (T-0182 review): the page asks the keychain again every few
   // seconds, and past the limit says it cannot read it and offers Try again, never "Checking…" for ever
   const [waited, setWaited] = useState(0);
-  const waitingSince = useRef(Date.now());
+  const waitingSince = useRef(0);
+  useEffect(() => {
+    waitingSince.current = Date.now();
+  }, []);
   const waiting = !sessionLoaded || !dataLoaded;
   useEffect(() => {
     if (!waiting) return;
@@ -124,7 +127,7 @@ export default function KeyboardSessionScreen() {
         <View style={styles.centre}>
           <Text style={styles.title}>Sign in first</Text>
           <Body style={styles.text}>
-            The Wispra keyboard's mic turns your voice into text with Wispra Cloud. Sign in in Account, then tap the mic on the
+            The Wispra keyboard&apos;s mic turns your voice into text with Wispra Cloud. Sign in in Account, then tap the mic on the
             keyboard again.
           </Body>
           <Button kind="primary" label="Open Account" onPress={() => router.replace('/account')} />

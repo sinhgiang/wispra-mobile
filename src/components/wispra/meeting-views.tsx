@@ -118,7 +118,7 @@ export function MeetingPlayer({ entry, seekRequest }: { entry: Entry; seekReques
 
   // At the end of a piece, carry on with the next one
   useEffect(() => {
-    if (status.didJustFinish && index < sources.length - 1) load(index + 1, 0, true);
+    if (status.didJustFinish && index < sources.length - 1) queueMicrotask(() => load(index + 1, 0, true));
     // load depends on index and sources, both listed
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status.didJustFinish]);
@@ -136,7 +136,7 @@ export function MeetingPlayer({ entry, seekRequest }: { entry: Entry; seekReques
   };
 
   useEffect(() => {
-    if (seekRequest) jump(seekRequest.ms);
+    if (seekRequest) queueMicrotask(() => jump(seekRequest.ms));
     // Runs when a new seek is asked for
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekRequest?.n]);
@@ -187,25 +187,27 @@ export function MeetingPlayer({ entry, seekRequest }: { entry: Entry; seekReques
 export function SeekBar({ positionMs, totalMs, onSeek }: { positionMs: number; totalMs: number; onSeek: (ms: number) => void }) {
   const [width, setWidth] = useState(0);
   const [dragMs, setDragMs] = useState<number | null>(null);
-  const live = useRef({ width, totalMs, onSeek });
-  live.current = { width, totalMs, onSeek };
+  // One object for the handlers below, kept up to date after each render
+  const [live] = useState(() => ({ width, totalMs, onSeek }));
+  useEffect(() => {
+    Object.assign(live, { width, totalMs, onSeek });
+  });
 
-  const responder = useMemo(
-    () =>
-      PanResponder.create({
+  // Made once; the handlers read the latest values from `live`
+  const [responder] = useState(() =>
+    PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
         onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: (e) => setDragMs(seekPosition(e.nativeEvent.locationX, live.current.width, live.current.totalMs)),
-        onPanResponderMove: (e) => setDragMs(seekPosition(e.nativeEvent.locationX, live.current.width, live.current.totalMs)),
+        onPanResponderGrant: (e) => setDragMs(seekPosition(e.nativeEvent.locationX, live.width, live.totalMs)),
+        onPanResponderMove: (e) => setDragMs(seekPosition(e.nativeEvent.locationX, live.width, live.totalMs)),
         onPanResponderRelease: (e) => {
-          const ms = seekPosition(e.nativeEvent.locationX, live.current.width, live.current.totalMs);
+          const ms = seekPosition(e.nativeEvent.locationX, live.width, live.totalMs);
           setDragMs(null);
-          live.current.onSeek(ms);
+          live.onSeek(ms);
         },
         onPanResponderTerminate: () => setDragMs(null),
       }),
-    [],
   );
 
   const shown = dragMs ?? positionMs;

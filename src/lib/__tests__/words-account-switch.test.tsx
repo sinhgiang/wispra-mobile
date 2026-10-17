@@ -3,6 +3,7 @@
 // account. The real store runs; the phone's files and the sign-in are stand-ins.
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { act, render } from '@testing-library/react-native';
+import { useEffect } from 'react';
 
 import type { Entry } from '@/lib/entries';
 
@@ -64,7 +65,10 @@ const dictation: Entry = {
 
 let api: ReturnType<typeof useEntries> | null = null;
 function Probe() {
-  api = useEntries();
+  const value = useEntries();
+  useEffect(() => {
+    api = value;
+  });
   return null;
 }
 

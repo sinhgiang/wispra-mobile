@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PanResponder, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Circle, Defs, G, Line, Path, Pattern, Rect, Text as SvgText } from 'react-native-svg';
 
@@ -56,30 +56,36 @@ export function MindMapView({ map }: { map: MindMap }) {
   const [view, setView] = useState<View2>({ x: 0, y: 0, k: 1 });
   const layout = useMemo(() => layoutMap(tree, expanded), [tree, expanded]);
 
-  // A new map, or another level: everything is fitted to the canvas again
-  useEffect(() => {
+  // A new map, or another level: the branches are opened again for it (state adjusted while rendering)
+  const [shownFor, setShownFor] = useState({ tree, level });
+  if (shownFor.tree !== tree || shownFor.level !== level) {
+    setShownFor({ tree, level });
     setExpanded(expandedForLevel(tree, level));
     setSelected(null);
-  }, [tree, level]);
-  useEffect(() => {
+  }
+  // Fitted to the canvas when the shape of the map or the width changes, not on every pan
+  const [fittedFor, setFittedFor] = useState({ layout, width: size.width });
+  if (fittedFor.layout !== layout || fittedFor.width !== size.width) {
+    setFittedFor({ layout, width: size.width });
     if (size.width > 0) setView(fitView(layout, size.width, size.height));
-    // Fitted when the shape of the map changes, not on every pan
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layout, size.width]);
+  }
 
-  const live = useRef({ view, size });
-  live.current = { view, size };
-  const gesture = useRef<{ start: View2; dist: number; mid: { x: number; y: number } } | null>(null);
+  // One object for the gesture handlers below, kept up to date after each render
+  const [live] = useState(() => ({ view, size }));
+  useEffect(() => {
+    Object.assign(live, { view, size });
+  });
+  const [gesture] = useState<{ current: { start: View2; dist: number; mid: { x: number; y: number } } | null }>(() => ({ current: null }));
 
-  const responder = useMemo(
-    () =>
-      PanResponder.create({
+  // Made once; the handlers read the latest values from `live`
+  const [responder] = useState(() =>
+    PanResponder.create({
         // Taps go to the nodes; a move of a few points is a pan or a pinch
         onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4 || g.numberActiveTouches > 1,
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: () => {
-          gesture.current = { start: live.current.view, dist: 0, mid: { x: 0, y: 0 } };
+          gesture.current = { start: live.view, dist: 0, mid: { x: 0, y: 0 } };
         },
         onPanResponderMove: (e, g) => {
           const state = gesture.current;
@@ -92,7 +98,7 @@ export function MindMapView({ map }: { map: MindMap }) {
             if (state.dist === 0) {
               state.dist = dist;
               state.mid = mid;
-              state.start = live.current.view;
+              state.start = live.view;
               return;
             }
             const k = clamp(state.start.k * (dist / state.dist), MIN_K, MAX_K);
@@ -112,7 +118,6 @@ export function MindMapView({ map }: { map: MindMap }) {
           gesture.current = null;
         },
       }),
-    [],
   );
 
   const zoomBy = (factor: number) =>
