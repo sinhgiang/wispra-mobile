@@ -1,0 +1,46 @@
+# Cheap check for every pull request: lint, type check and the Jest tests (T-0555).
+# One job on ubuntu-latest (Linux minutes cost 1x; macOS costs 10x and Windows 2x), no build of an
+# installable app (android.yml and ios.yml and Codemagic do that). No secret of any kind is used.
+
+name: CI
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.vscode/**'
+
+# Read-only token: this workflow only checks code, it never pushes, comments or releases.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Jest tests
+        run: npm test -- --ci
