@@ -19,18 +19,20 @@ export function KeyboardSessionBridge() {
   const { cloudAllowed, entries } = useEntries();
   // The user's writing style for the punctuation step: read at each piece (T-0182)
   const entriesNow = useRef(entries);
-  entriesNow.current = entries;
   const style = useRef<() => string>(() => '');
-  style.current = () => {
-    try {
-      return styleBlock(entriesNow.current ?? [], loadLearned(), loadLearning().learning);
-    } catch {
-      return '';
-    }
-  };
   // Read at each piece, so a sign-in change during a session is seen at once
   const allowed = useRef(cloudAllowed);
-  allowed.current = cloudAllowed;
+  useEffect(() => {
+    entriesNow.current = entries;
+    style.current = () => {
+      try {
+        return styleBlock(entriesNow.current ?? [], loadLearned(), loadLearning().learning);
+      } catch {
+        return '';
+      }
+    };
+    allowed.current = cloudAllowed;
+  });
   // Re-read when the sign-in or the data on the phone finishes loading: a cold start opens with neither
   // ready, and AppState sends no "active" for the state the app starts in
   useSession();

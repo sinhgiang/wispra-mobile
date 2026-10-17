@@ -19,7 +19,9 @@ export function WordsSync() {
   const { cloudAllowed, loaded } = useEntries();
   const session = useSession();
   const allowedNow = useRef(cloudAllowed);
-  allowedNow.current = cloudAllowed;
+  useEffect(() => {
+    allowedNow.current = cloudAllowed;
+  });
   const account = useRef<Account>(() => {
     const s = currentSession();
     return s && allowedNow.current() ? { userId: s.userId } : null;

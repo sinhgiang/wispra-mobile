@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -23,9 +23,11 @@ export default function VocabularyScreen() {
   const [error, setError] = useState<string | null>(null);
   const status = useWordsSyncStatus();
   // A sync writes the file quietly. Show that list, including a word that arrived from the computer.
-  useEffect(() => {
+  const [seenAt, setSeenAt] = useState(status.at);
+  if (seenAt !== status.at) {
+    setSeenAt(status.at);
     setTerms(loadVocabulary());
-  }, [status.at]);
+  }
 
   const change = (next: string[]) => {
     try {

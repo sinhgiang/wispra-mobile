@@ -15,7 +15,7 @@ export function useSetupStateBase(): { state: SetupState; refresh: () => void } 
   const session = useSession();
   const { entries } = useEntries();
   const [keyboard, setKeyboard] = useState<KeyboardStatus | null>(null);
-  const [bubbleOn, setBubbleOn] = useState(false);
+  const [bubbleOn, setBubbleOn] = useState(() => Platform.OS !== 'ios' && isServiceEnabled());
 
   const refresh = useCallback(() => {
     if (Platform.OS === 'ios') void keyboardStatus().then(setKeyboard);
@@ -23,7 +23,8 @@ export function useSetupStateBase(): { state: SetupState; refresh: () => void } 
   }, []);
 
   useEffect(() => {
-    refresh();
+    // Android read its state when the hook was created; iPhone asks the keyboard now
+    if (Platform.OS === 'ios') void keyboardStatus().then(setKeyboard);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') refresh();
     });

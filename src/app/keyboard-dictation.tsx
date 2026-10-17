@@ -45,11 +45,13 @@ export default function KeyboardDictationScreen() {
         setStage(ok ? 'ready' : 'saved');
         if (!ok) setMessage('The keyboard could not be reached. The words are in History.');
       });
-    } else if (entry.status === 'failed' || (entry.status === 'pending' && entry.error)) {
-      setStage('error');
-      setMessage(entry.error ?? 'Could not transcribe. The audio is kept in History.');
     }
   }, [entry]);
+  // A recording that could not be transcribed: shown from the entry itself, until the words are handed over
+  const failed = !!entry && (entry.status === 'failed' || (entry.status === 'pending' && !!entry.error));
+  const showError = failed && stage !== 'ready';
+  const shownStage: Stage = showError ? 'error' : stage;
+  const shownMessage = showError ? (entry?.error ?? 'Could not transcribe. The audio is kept in History.') : message;
 
   const done = async () => {
     const id = await rec.stop();
@@ -71,7 +73,7 @@ export default function KeyboardDictationScreen() {
     <SafeAreaView style={[ui.screen, styles.screen]}>
       <Label style={styles.top}>Wispra keyboard</Label>
 
-      {stage === 'listening' ? (
+      {shownStage === 'listening' ? (
         <View style={styles.centre}>
           <View style={ui.row}>
             <View style={styles.dot} />
@@ -86,14 +88,14 @@ export default function KeyboardDictationScreen() {
         </View>
       ) : null}
 
-      {stage === 'transcribing' ? (
+      {shownStage === 'transcribing' ? (
         <View style={styles.centre}>
           <Text style={styles.title}>Transcribing…</Text>
           <Body style={styles.hint}>Stay here a moment; the words are almost ready.</Body>
         </View>
       ) : null}
 
-      {stage === 'ready' ? (
+      {shownStage === 'ready' ? (
         <View style={styles.centre}>
           <Text style={styles.title}>Ready</Text>
           <Card>
@@ -106,10 +108,10 @@ export default function KeyboardDictationScreen() {
         </View>
       ) : null}
 
-      {stage === 'saved' || stage === 'error' ? (
+      {shownStage === 'saved' || shownStage === 'error' ? (
         <View style={styles.centre}>
-          <Text style={styles.title}>{stage === 'error' ? 'Not typed' : 'Saved'}</Text>
-          <Body style={styles.hint}>{message ?? ''}</Body>
+          <Text style={styles.title}>{shownStage === 'error' ? 'Not typed' : 'Saved'}</Text>
+          <Body style={styles.hint}>{shownMessage ?? ''}</Body>
           <Button label="Open History" onPress={() => router.replace('/history')} />
         </View>
       ) : null}
