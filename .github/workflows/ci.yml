@@ -1,6 +1,9 @@
-# Cheap check for every pull request: lint, type check and the Jest tests (T-0555).
+# Cheap check for every pull request: lint, type check, the Jest tests (T-0555) and a build of the
+# JavaScript bundle for Android and iOS (T-0901).
 # One job on ubuntu-latest (Linux minutes cost 1x; macOS costs 10x and Windows 2x), no build of an
-# installable app (android.yml and ios.yml and Codemagic do that). No secret of any kind is used.
+# installable app (android.yml and ios.yml and Codemagic do that). No secret of any kind is used and
+# nothing is signed or sent to a store. The repository is not in the Helme runners file, so the job
+# runs on GitHub's machines.
 
 name: CI
 
@@ -44,3 +47,9 @@ jobs:
 
       - name: Jest tests
         run: npm test -- --ci
+
+      # Metro bundles the whole app for both platforms (Hermes bytecode included): catches an import
+      # that does not resolve or a module that fails to compile, which lint and tsc can miss. The
+      # output goes to the runner's temp folder and is not kept.
+      - name: Build the JavaScript bundle (Android and iOS)
+        run: npx expo export --platform all --output-dir "$RUNNER_TEMP/expo-export"
