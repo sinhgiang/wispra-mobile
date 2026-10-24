@@ -52,4 +52,4 @@ jobs:
       # that does not resolve or a module that fails to compile, which lint and tsc can miss. The
       # output goes to the runner's temp folder and is not kept.
       - name: Build the JavaScript bundle (Android and iOS)
-        run: npx expo export --platform all --output-dir "$RUNNER_TEMP/expo-export"
+        run: npx expo export --platform android --platform ios --output-dir "$RUNNER_TEMP/expo-export"
