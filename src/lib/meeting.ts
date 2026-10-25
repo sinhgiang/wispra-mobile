@@ -64,6 +64,8 @@ export interface MeetingNotes {
   // How many transcript paragraphs the live outline has seen
   liveRefs?: number;
   mindMap?: MindMap;
+  // Tokens Wispra Cloud billed for writing the summary (the allowance it used), when it was measured
+  summaryTokens?: number;
   // The post of earlier builds (one LinkedIn/Facebook text); kept, no longer written
   post?: string;
   // The website article and the social posts, by platform (T-0164, as on the computer)

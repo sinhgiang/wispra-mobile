@@ -86,7 +86,7 @@ describe('what the question says', () => {
   const data = phoneData(annasPhone);
 
   it('counts what is on the phone, and what is only here', () => {
-    expect(data).toEqual({ dictations: 3, meetings: 1, onlyHere: 2 });
+    expect(data).toEqual({ dictations: 3, meetings: 1, notes: 0, onlyHere: 2 });
   });
 
   it('names both accounts, the counts, and says nothing syncs before a choice', () => {

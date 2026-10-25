@@ -1,9 +1,10 @@
 import { recoverSegments, transcriptLines, type MeetingNotes, type MeetingSegment, type TranscriptLine } from './meeting';
+import type { NoteData } from './notes';
 
-// Dictations and meetings kept on the phone. Pure functions only, so they can be tested without
-// native modules.
+// Dictations, meetings and notes kept on the phone. Pure functions only, so they can be tested
+// without native modules.
 
-export type EntryKind = 'dictation' | 'meeting';
+export type EntryKind = 'dictation' | 'meeting' | 'note';
 
 // recording: the microphone is (or was, if the app was killed) still writing the audio file
 // pending:   audio saved, not transcribed yet
@@ -35,6 +36,9 @@ export interface Entry {
   originalText?: string;
   // Whether "Learn my words" was on when this was dictated (the statistics compare the two)
   learning?: boolean;
+  // A note (kind 'note', T-0979): its title, field, expert version and mind map. The words said are
+  // `text`, kept as they are; the rewrites never replace them.
+  note?: NoteData;
 }
 
 // The text a fix leaves, and what it replaced; null when there is nothing to save (empty, or the
@@ -78,7 +82,7 @@ export function createEntry(kind: EntryKind, now: Date = new Date(), id: string 
   return {
     id,
     kind,
-    title: kind === 'meeting' ? defaultMeetingTitle(now) : 'Dictation',
+    title: kind === 'meeting' ? defaultMeetingTitle(now) : kind === 'note' ? defaultNoteTitle(now) : 'Dictation',
     createdAt: now.toISOString(),
     durationMs: 0,
     status: 'recording',
@@ -86,11 +90,17 @@ export function createEntry(kind: EntryKind, now: Date = new Date(), id: string 
     text: null,
     error: null,
     bookmarks: [],
+    ...(kind === 'note' ? { note: { status: 'new' as const } } : {}),
   };
 }
 
 export function defaultMeetingTitle(date: Date): string {
   return `Meeting ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// The title of a note until the AI names it (never replaces a title the person typed)
+export function defaultNoteTitle(date: Date): string {
+  return `Ghi chú ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 // Newest first
@@ -112,7 +122,7 @@ function fold(text: string): string {
 export function matchesQuery(entry: Entry, query: string): boolean {
   const words = fold(query).split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
-  const haystack = fold(`${entry.title}\n${entry.text ?? ''}`);
+  const haystack = fold(`${entry.title}\n${entry.text ?? ''}\n${entry.note?.domain ?? ''}`);
   return words.every((w) => haystack.includes(w));
 }
 
@@ -203,7 +213,7 @@ export function needsTranscription(entry: Entry): boolean {
 // One line shown under the title in lists
 export function previewText(entry: Entry): string {
   const length = formatDuration(entry.durationMs);
-  // A meeting shows its length and what came out of it, as in the design; a dictation its words
+  // A meeting shows its length and what came out of it, as in the design; a dictation or a note its words
   if (entry.text && entry.kind !== 'meeting') return entry.text.replace(/\s+/g, ' ').trim();
   if (entry.kind === 'meeting') {
     // Finished with nothing in it: the reason, not an empty meeting that looks fine
@@ -221,7 +231,7 @@ export function isEntry(value: unknown): value is Entry {
   return (
     !!v &&
     typeof v.id === 'string' &&
-    (v.kind === 'dictation' || v.kind === 'meeting') &&
+    (v.kind === 'dictation' || v.kind === 'meeting' || v.kind === 'note') &&
     typeof v.createdAt === 'string' &&
     typeof v.status === 'string'
   );
@@ -238,12 +248,13 @@ export function parseEntries(json: string): Entry[] {
   const rows = Array.isArray((data as { entries?: unknown })?.entries) ? (data as { entries: unknown[] }).entries : [];
   return rows.filter(isEntry).map((e) => ({
     ...e,
-    title: e.title ?? (e.kind === 'meeting' ? 'Meeting' : 'Dictation'),
+    title: e.title ?? (e.kind === 'meeting' ? 'Meeting' : e.kind === 'note' ? 'Ghi chú' : 'Dictation'),
     durationMs: e.durationMs ?? 0,
     audioUri: e.audioUri ?? null,
     text: e.text ?? null,
     error: e.error ?? null,
     bookmarks: Array.isArray(e.bookmarks) ? e.bookmarks : [],
+    ...(e.kind === 'note' ? { note: e.note && typeof e.note === 'object' ? e.note : { status: 'new' as const } } : {}),
   }));
 }
 

@@ -12,6 +12,8 @@ export class AiError extends Error {
     message: string,
     // Nothing is wrong with the request: try again later (offline, busy, signed out)
     readonly transient: boolean,
+    // The answer arrived but has no JSON in it (worth asking again, or asking for a repair)
+    readonly badForm = false,
   ) {
     super(message);
   }
@@ -22,7 +24,18 @@ interface ChatMessage {
   content: string;
 }
 
-async function chat(messages: ChatMessage[], maxTokens: number, json: boolean, temperature = 0.2): Promise<string> {
+// Adds up the tokens Wispra Cloud bills for the calls it is given (the "usage" of each answer), so a
+// feature can say what it cost the account's monthly allowance
+export interface AiMeter {
+  tokens: number;
+  calls: number;
+}
+
+export function newMeter(): AiMeter {
+  return { tokens: 0, calls: 0 };
+}
+
+async function chat(messages: ChatMessage[], maxTokens: number, json: boolean, temperature = 0.2, meter?: AiMeter): Promise<string> {
   const token = await validToken();
   if (!token) throw new AiError('Sign in to Wispra Cloud in Account to use AI notes.', true);
   const controller = new AbortController();
@@ -58,14 +71,27 @@ async function chat(messages: ChatMessage[], maxTokens: number, json: boolean, t
     if (response.status === 402) throw new AiError(detail || 'This month’s Wispra Cloud AI allowance is used up.', false);
     throw new AiError(detail ? `Wispra Cloud: ${detail}` : `AI request failed (HTTP ${response.status}).`, response.status === 429 || response.status >= 500);
   }
-  const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
+  const data = (await response.json()) as { choices?: { message?: { content?: string } }[]; usage?: { total_tokens?: unknown; prompt_tokens?: unknown; completion_tokens?: unknown } };
+  if (meter) {
+    meter.calls += 1;
+    meter.tokens += billedTokens(data.usage);
+  }
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new AiError('Wispra Cloud gave an empty answer. Try again.', true);
   return content;
 }
 
+// What Wispra Cloud bills for a call: Groq's total, or prompt plus completion (wispra-web billedTokens)
+export function billedTokens(usage: { total_tokens?: unknown; prompt_tokens?: unknown; completion_tokens?: unknown } | undefined): number {
+  if (!usage) return 0;
+  if (typeof usage.total_tokens === 'number') return usage.total_tokens;
+  const prompt = typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : 0;
+  const completion = typeof usage.completion_tokens === 'number' ? usage.completion_tokens : 0;
+  return prompt + completion;
+}
+
 // temperature: 0.2 for notes; the computer writes posts at 0.5 (postprocess.ts)
-export async function chatJson(system: string, user: string, maxTokens: number, temperature = 0.2): Promise<unknown> {
+export async function chatJson(system: string, user: string, maxTokens: number, temperature = 0.2, meter?: AiMeter): Promise<unknown> {
   const answer = await chat(
     [
       { role: 'system', content: system },
@@ -74,8 +100,9 @@ export async function chatJson(system: string, user: string, maxTokens: number, 
     maxTokens,
     true,
     temperature,
+    meter,
   );
   const value = extractJson(answer);
-  if (!value) throw new AiError('Wispra Cloud answered in an unexpected form. Try again.', true);
+  if (!value) throw new AiError('Wispra Cloud answered in an unexpected form. Try again.', true, true);
   return value;
 }

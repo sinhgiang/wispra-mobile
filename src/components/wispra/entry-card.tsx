@@ -24,9 +24,10 @@ export function EntryCard({ entry, onPress }: { entry: Entry; onPress?: () => vo
 function DoneCard({ entry, onPress }: { entry: Entry; onPress?: () => void }) {
   const askDelete = useDelete(entry);
   const meeting = entry.kind === 'meeting';
-  // MTG a meeting, PC a dictation made with Wispra on the computer, DIC one made on this phone
-  const tag = meeting ? 'MTG' : entry.source === 'computer' ? 'PC' : 'DIC';
-  const tagColor = meeting ? W.green : entry.source === 'computer' ? W.amberSoft : W.accentSoft;
+  // MTG a meeting, NOTE a note, PC a dictation made with Wispra on the computer, DIC one made on this phone
+  const note = entry.kind === 'note';
+  const tag = meeting ? 'MTG' : note ? 'NOTE' : entry.source === 'computer' ? 'PC' : 'DIC';
+  const tagColor = meeting ? W.green : note ? W.accent : entry.source === 'computer' ? W.amberSoft : W.accentSoft;
   return (
     <Pressable
       accessibilityRole="button"
@@ -80,7 +81,7 @@ export function PendingCard({ entry, onPress }: { entry: Entry; onPress?: () => 
 const styles = StyleSheet.create({
   card: { flexDirection: 'row', gap: Gap.m, padding: 14, borderRadius: 14, backgroundColor: W.surface, alignItems: 'flex-start' },
   tag: { width: 36, height: 36, borderRadius: 10, backgroundColor: W.surfaceRaised, alignItems: 'center', justifyContent: 'center' },
-  tagText: { fontSize: 12, fontWeight: '700' },
+  tagText: { fontSize: 11, fontWeight: '700' },
   main: { flex: 1, minWidth: 0, gap: 3 },
   head: { flexDirection: 'row', justifyContent: 'space-between', gap: Gap.s },
   title: { flex: 1, color: W.text, fontSize: 14, fontWeight: '600' },

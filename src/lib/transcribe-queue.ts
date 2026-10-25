@@ -14,7 +14,9 @@ export type Job =
   | { kind: 'split-piece'; entry: Entry; piece: MeetingSegment }
   | { kind: 'transcribe-piece'; entry: Entry; piece: MeetingSegment }
   | { kind: 'transcribe-entry'; entry: Entry }
-  | { kind: 'notes'; entry: Entry };
+  | { kind: 'notes'; entry: Entry }
+  // The title, field and expert outline of a note whose words have arrived (T-0979)
+  | { kind: 'note-ai'; entry: Entry };
 
 export interface QueueRules {
   // A meeting whose pieces are all done or failed, and that is no longer recording
@@ -23,6 +25,8 @@ export interface QueueRules {
   wantsNotes(e: Entry): boolean;
   // A piece too long to send in one go, which this phone can cut
   needsSplit(piece: MeetingSegment): boolean;
+  // A note whose words are written and that has no title, field and outline yet
+  wantsNoteAi?(e: Entry): boolean;
 }
 
 // The key a job is skipped by for the rest of a run
@@ -49,6 +53,7 @@ export function nextJob(entries: Entry[], skip: ReadonlySet<string>, rules: Queu
     }
     if (!e.segments && e.status === 'pending') candidates.push({ kind: 'transcribe-entry', entry: e });
     if (rules.wantsNotes(e)) candidates.push({ kind: 'notes', entry: e });
+    if (rules.wantsNoteAi?.(e)) candidates.push({ kind: 'note-ai', entry: e });
     const job = candidates.find((j) => !skip.has(jobKey(j)));
     if (job) return job;
   }

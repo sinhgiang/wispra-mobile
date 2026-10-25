@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PanResponder, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Circle, Defs, G, Line, Path, Pattern, Rect, Text as SvgText } from 'react-native-svg';
 
@@ -31,6 +31,8 @@ const LEVELS: { value: number; label: string }[] = [
 const MIN_K = 0.15;
 const MAX_K = 2.5;
 const CANVAS_HEIGHT = 440;
+// How long the system gets to draw the map as a picture before the map is shared as text instead
+export const SNAPSHOT_TIMEOUT_MS = 5000;
 const PAD = 24;
 
 interface View2 {
@@ -47,7 +49,15 @@ function fitView(layout: MapLayout, width: number, height: number): View2 {
   return { x: (width - w * k) / 2, y: (height - h * k) / 2, k };
 }
 
-export function MindMapView({ map }: { map: MindMap }) {
+// What a screen needs to save the map as a picture (the Notes tab's "Tải xuống")
+export interface MapExporter {
+  // The whole map, with every branch open as the person left them, as a PNG in base64
+  toPngBase64(): Promise<string | null>;
+}
+
+export function MindMapView({ map, onExporter }: { map: MindMap; onExporter?: (exporter: MapExporter | null) => void }) {
+  const svgRef = useRef<Svg>(null);
+  const [exporting, setExporting] = useState(false);
   const tree = useMemo(() => buildTree(map), [map]);
   const [level, setLevel] = useState(2);
   const [expanded, setExpanded] = useState<Set<string>>(() => expandedForLevel(tree, 2));
@@ -137,6 +147,41 @@ export function MindMapView({ map }: { map: MindMap }) {
     });
 
   const picture = useMemo(() => <MapPicture layout={layout} selected={selected} onToggle={toggle} onSelect={setSelected} />, [layout, selected]);
+
+  // The picture is drawn at twice its size so the text stays sharp when it is saved
+  useEffect(() => {
+    if (!onExporter) return;
+    const scale = Math.min(2, 4000 / Math.max(layout.bounds.w, layout.bounds.h, 1));
+    const snapshot = () =>
+      new Promise<string | null>((resolve) => {
+        const svg = svgRef.current;
+        if (!svg || typeof svg.toDataURL !== 'function') return resolve(null);
+        // The system may never answer; the screen then falls back to sharing the map as text
+        const timer = setTimeout(() => resolve(null), SNAPSHOT_TIMEOUT_MS);
+        const answer = (base64: string | null) => {
+          clearTimeout(timer);
+          resolve(base64 || null);
+        };
+        try {
+          svg.toDataURL((base64: string) => answer(base64), { width: Math.round(layout.bounds.w * scale), height: Math.round(layout.bounds.h * scale) });
+        } catch {
+          answer(null);
+        }
+      });
+    onExporter({
+      // The background is only put in while the picture is taken, so on screen the dots show through
+      toPngBase64: async () => {
+        setExporting(true);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          return await snapshot();
+        } finally {
+          setExporting(false);
+        }
+      },
+    });
+    return () => onExporter(null);
+  }, [layout, onExporter]);
   const chosen = layout.nodes.find((n) => n.id === selected) ?? null;
 
   return (
@@ -175,7 +220,8 @@ export function MindMapView({ map }: { map: MindMap }) {
               transform: [{ translateX: view.x }, { translateY: view.y }, { scale: view.k }],
             },
           ]}>
-          <Svg width={layout.bounds.w} height={layout.bounds.h} viewBox={`${layout.bounds.minX} ${layout.bounds.minY} ${layout.bounds.w} ${layout.bounds.h}`}>
+          <Svg ref={svgRef} width={layout.bounds.w} height={layout.bounds.h} viewBox={`${layout.bounds.minX} ${layout.bounds.minY} ${layout.bounds.w} ${layout.bounds.h}`}>
+            {exporting ? <Rect x={layout.bounds.minX} y={layout.bounds.minY} width={layout.bounds.w} height={layout.bounds.h} fill={MAP_THEME.canvas} /> : null}
             {picture}
           </Svg>
         </View>

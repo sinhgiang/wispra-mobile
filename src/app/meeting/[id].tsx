@@ -145,6 +145,7 @@ function SummaryTab({ entry, working }: { entry: Entry; working: boolean }) {
         <Card>
           <Text style={styles.section}>Summary</Text>
           <SummaryText text={notes.summary} />
+          {notes.summaryTokens ? <Text style={styles.note}>{`AI: ${notes.summaryTokens.toLocaleString('en-US')} tokens of your allowance.`}</Text> : null}
           {/* Notes written before a fix (English headings, garbled words) can be written again */}
           <View style={ui.row}>
             <Button small label={working ? 'Writing…' : 'Write again'} disabled={working} onPress={() => void makeNotes(entry.id)} />

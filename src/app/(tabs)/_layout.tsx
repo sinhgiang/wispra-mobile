@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { W } from '@/constants/wispra';
 
-// The bottom bar of the approved design: four text tabs, the current one in the accent colour.
+// The bottom bar of the approved design: five text tabs, the current one in the accent colour.
 // TabList hands its child's style to a Slot, which only accepts a flat style object.
 export default function WispraTabs() {
   const insets = useSafeAreaInsets();
@@ -18,6 +18,9 @@ export default function WispraTabs() {
           </TabTrigger>
           <TabTrigger name="meetings" href="/meetings" asChild>
             <TabButton>Meetings</TabButton>
+          </TabTrigger>
+          <TabTrigger name="notes" href="/notes" asChild>
+            <TabButton>Ghi chú</TabButton>
           </TabTrigger>
           <TabTrigger name="history" href="/history" asChild>
             <TabButton>History</TabButton>
