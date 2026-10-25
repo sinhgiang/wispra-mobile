@@ -425,7 +425,7 @@ const styles = StyleSheet.create({
   menuItemOn: { backgroundColor: '#272a52' },
   menuLabel: { color: W.text, fontSize: 13 },
   menuHint: { color: W.muted, fontSize: 11, marginTop: 1 },
-  body: { paddingHorizontal: Gap.xl, paddingBottom: Gap.xl, gap: Gap.m },
+  body: { paddingHorizontal: Gap.xl, paddingTop: Gap.s, paddingBottom: Gap.xl, gap: Gap.m },
   text: { color: W.text, fontSize: 14, lineHeight: 21 },
   note: { color: W.muted, fontSize: 13, lineHeight: 19 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Gap.s },
