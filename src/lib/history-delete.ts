@@ -176,18 +176,18 @@ export function deleteOneWarning(entry: Entry, signedIn: boolean): DeleteWarning
     const shared = !!entry.syncedAt;
     if (signedIn && shared) {
       return {
-        title: 'Xóa ghi chú này ở mọi nơi?',
+        title: 'Delete this note everywhere?',
         message:
-          'Ghi chú sẽ bị xóa khỏi điện thoại này, khỏi Wispra Cloud và khỏi mọi thiết bị đăng nhập cùng tài khoản Wispra, kể cả máy tính. Không thể hoàn tác.',
-        confirm: 'Xóa ở mọi nơi',
+          'It will be deleted from this phone, from Wispra Cloud and from every device signed in to your Wispra account, your computer included. This cannot be undone.',
+        confirm: 'Delete everywhere',
       };
     }
     return {
-      title: 'Xóa ghi chú khỏi điện thoại này?',
+      title: 'Delete this note from this phone?',
       message: signedIn
-        ? 'Ghi chú chưa được đồng bộ sang thiết bị khác, nên chỉ bị xóa khỏi điện thoại này. Không thể hoàn tác.'
-        : 'Bạn chưa đăng nhập, nên ghi chú chỉ bị xóa khỏi điện thoại này. Bản đã đồng bộ sang máy tính (nếu có) vẫn còn ở đó. Không thể hoàn tác.',
-      confirm: 'Xóa khỏi điện thoại này',
+        ? 'It has not been shared with your other devices yet, so it is deleted from this phone only. This cannot be undone.'
+        : 'You are not signed in, so it is deleted from this phone only. A copy already shared with your computer stays there. This cannot be undone.',
+      confirm: 'Delete from this phone',
     };
   }
   if (entry.kind === 'meeting') {

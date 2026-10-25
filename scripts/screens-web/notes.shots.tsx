@@ -22,6 +22,7 @@ const { createRoot } = require('react-dom/client') as {
 let mockEntries: Entry[] = [];
 let mockId = 'mobile-n1';
 let mockPhase = 'idle';
+let mockTab = 'notes';
 const mockBusy = new Set<string>();
 
 jest.mock('react-native-safe-area-context', () => {
@@ -40,9 +41,10 @@ jest.mock('expo-router/ui', () => {
     TabSlot: () => null,
     TabList: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
     // The tab of the screen being drawn is the focused one
-    TabTrigger: ({ children, name }: { children: React.ReactElement; name: string }) => cloneElement(children, { isFocused: name === 'notes' } as never),
+    TabTrigger: ({ children, name }: { children: React.ReactElement; name: string }) => cloneElement(children, { isFocused: name === mockTab } as never),
   };
 });
+jest.mock('@/components/wispra/setup-reminders', () => ({ SetupReminders: () => null }));
 jest.mock('expo-clipboard', () => ({ setStringAsync: async () => true }));
 jest.mock('expo-file-system', () => ({ File: class {}, Directory: class {}, Paths: { cache: 'cache' } }));
 jest.mock('expo-audio', () => ({ useAudioPlayer: () => ({}), useAudioPlayerStatus: () => ({}) }));
@@ -61,13 +63,24 @@ jest.mock('@/lib/entries-store', () => ({
     removeAll: jest.fn(),
     writeNote: jest.fn(async () => undefined),
     setNoteStatus: jest.fn(),
+    makeNotes: jest.fn(),
+    updateNotes: jest.fn(),
+    makeMindMapFor: jest.fn(),
+    makeContentFor: jest.fn(),
+    ask: jest.fn(),
   }),
 }));
 
 // eslint-disable-next-line import/first
 import WispraTabs from '@/app/(tabs)/_layout';
 // eslint-disable-next-line import/first
+import HistoryScreen from '@/app/(tabs)/history';
+// eslint-disable-next-line import/first
+import MeetingsScreen from '@/app/(tabs)/meetings';
+// eslint-disable-next-line import/first
 import NotesScreen from '@/app/(tabs)/notes';
+// eslint-disable-next-line import/first
+import MeetingScreen from '@/app/meeting/[id]';
 // eslint-disable-next-line import/first
 import NoteScreen from '@/app/note/[id]';
 // eslint-disable-next-line import/first
@@ -90,55 +103,69 @@ class FixedSizes {
 const OUT = process.env.WISPRA_SHOTS_DIR ?? path.resolve(process.cwd(), '.screens-web');
 
 const SAID =
-  'Mình đang nghĩ tới một nền tảng để người địa phương ở các tỉnh tự đăng tour và tự dẫn khách. Công ty có giấy phép đứng tên tổ chức. Cao Bằng đang có nhiều khách quốc tế nhưng ít tour trên các sàn. Khách hay phàn nàn chuyện hoàn tiền và huỷ sát giờ, nên phải nghĩ kỹ phần thanh toán.';
+  'I keep thinking about a platform where local people in the provinces list their own tours and guide their own guests. The company holds the licence and is the named organiser. Cao Bang gets a lot of foreign visitors but there are almost no tours on the big sites. Guests complain about refunds and last-minute cancellations, so payments need real thought.';
 const OUTLINE = [
-  '## Ý chính',
-  '- Nền tảng cho người địa phương vùng tỉnh tự đăng tour và tự dẫn khách.',
-  '- Công ty có giấy phép đứng tên tổ chức tour.',
-  '## Khoảng trống và rủi ro',
-  '- Cao Bằng: khách quốc tế tăng nhanh nhưng ít tour trên sàn.',
-  '- Hoàn tiền và huỷ sát giờ là điểm khách hay phàn nàn.',
-  '## Ba bước đầu',
-  '- Hỏi luật sư về mô hình hợp đồng với hướng dẫn viên.',
-  '- Thử thu tiền bằng PayPal và cổng thanh toán trong nước.',
-  '- Phỏng vấn tám hướng dẫn viên ở Cao Bằng.',
+  '## Main idea',
+  '- A platform for local people in the provinces to list tours and guide their own guests.',
+  '- The company holds the licence and is the named organiser of each tour.',
+  '## Gaps and risks',
+  '- Cao Bang: foreign visitors are growing fast, but few tours are listed.',
+  '- Refunds and late cancellations are what guests complain about most.',
+  '## First three steps',
+  '- Ask a lawyer about the contract model for guides.',
+  '- Try collecting payments with PayPal and a local gateway.',
+  '- Interview eight guides in Cao Bang.',
 ].join('\n');
 const MAP = {
-  title: 'Nền tảng tour',
-  note: 'Người địa phương tự đăng tour và tự dẫn khách.',
+  title: 'Local tour platform',
+  note: 'Local people list tours and guide their own guests.',
   topics: [
-    { label: 'Khoảng trống', note: 'Cao Bằng thiếu tour trên sàn.', points: [{ label: 'Cao Bằng', note: 'Khách quốc tế tăng nhanh' }, { label: 'Ít tour trên sàn' }] },
-    { label: 'Mô hình', points: [{ label: 'Giấy phép đứng tên công ty' }, { label: 'Hợp đồng hướng dẫn viên' }] },
-    { label: 'Rủi ro', points: [{ label: 'Hoàn tiền' }, { label: 'Huỷ sát giờ' }] },
+    { label: 'Gaps', note: 'Few tours listed in Cao Bang.', points: [{ label: 'Cao Bang', note: 'Foreign visitors growing' }, { label: 'Few tours listed' }] },
+    { label: 'Model', points: [{ label: 'Licence in company name' }, { label: 'Guide contracts' }] },
+    { label: 'Risks', points: [{ label: 'Refunds' }, { label: 'Late cancellations' }] },
   ],
   decisions: [],
-  actions: [{ label: 'Hỏi luật sư' }, { label: 'Phỏng vấn 8 hướng dẫn viên' }],
+  actions: [{ label: 'Ask a lawyer' }, { label: 'Interview 8 guides' }],
   questions: [],
-  branchLabels: { decisions: 'Quyết định', actions: 'Việc cần làm', questions: 'Câu hỏi mở' },
+  branchLabels: { decisions: 'Decisions', actions: 'Action items', questions: 'Open questions' },
 };
 
 function note(id: string, title: string, at: Date, data: Partial<NoteData>, over: Partial<Entry> = {}): Entry {
   return { ...createEntry('note', at, id), status: 'done', title, text: SAID, durationMs: 21_000, note: { status: 'new', ...data }, ...over };
 }
 
-const main = note('mobile-n1', 'Nền tảng tour do người địa phương dẫn', new Date(2026, 9, 25, 14, 32), {
-  domain: 'Du lịch',
-  role: 'chuyên gia phát triển thị trường du lịch',
+const main = note('mobile-n1', 'Local tour platform', new Date(2026, 9, 25, 14, 32), {
+  domain: 'Travel',
+  role: 'a travel-market development expert',
   outline: OUTLINE,
   mindMap: MAP,
   usage: { outline: { tokens: 2412, at: '2026-10-25T07:40:00.000Z' } },
 });
 const LIST: Entry[] = [
   main,
-  note('mobile-n2', 'Gói bảo dưỡng ô tô theo km', new Date(2026, 9, 23, 8, 51), { domain: 'Ô tô', status: 'keep' }),
-  note('mobile-n3', 'Bản tin theo ngành cho nhà sáng lập', new Date(2026, 9, 22, 19, 20), { domain: 'Marketing' }),
-  note('mobile-n4', 'Tính năng tải số liệu cho RepoTrending', new Date(2026, 9, 21, 21, 8), { domain: 'Phần mềm', status: 'develop' }),
+  note('mobile-n2', 'Car service plan by mileage', new Date(2026, 9, 23, 8, 51), { domain: 'Cars', status: 'keep' }, { text: 'A service plan priced by kilometres instead of by visit, with one price list shown before the car goes in.' }),
+  note('mobile-n3', 'Industry newsletter for founders', new Date(2026, 9, 22, 19, 20), { domain: 'Marketing' }, { text: 'A weekly newsletter per industry, written for founders who have no time to read the news themselves.' }),
+  note('mobile-n4', 'Data export for RepoTrending', new Date(2026, 9, 21, 21, 8), { domain: 'Software', status: 'develop' }, { text: 'Let people download the trending numbers as a file, with the date range they choose.' }),
+];
+
+const MEETING_NOTES = {
+  summary: 'The team agreed to ship the new pricing page next week.\n\n## Pricing\n- Three plans, monthly and yearly.\n- The free plan keeps its current limits.\n\n## Next steps\n- Draft the page copy and review it on Friday.',
+  actions: [{ text: 'Draft the pricing page copy', owner: 'Mia', due: 'Friday' }, { text: 'Check the yearly discount', owner: 'Tom' }],
+  topics: [{ title: 'Pricing page', startMs: 0 }, { title: 'Launch plan', startMs: 120_000 }],
+};
+const MEETINGS: Entry[] = [
+  { ...createEntry('meeting', new Date(2026, 9, 24, 10, 0), 'mobile-m1'), status: 'done', title: 'Pricing page review', durationMs: 1_820_000, text: 'We talked about the pricing page.', notes: MEETING_NOTES },
+  { ...createEntry('meeting', new Date(2026, 9, 22, 15, 30), 'mobile-m2'), status: 'done', title: 'Weekly sync', durationMs: 960_000, text: 'Weekly sync.', notes: { summary: 'Short sync.', actions: [{ text: 'Send the notes' }] } },
+];
+const DICTATIONS: Entry[] = [
+  { ...createEntry('dictation', new Date(2026, 9, 25, 9, 12), 'mobile-d1'), status: 'done', title: 'Notes', text: 'Remind the supplier about the invoice before Friday.', durationMs: 6_000 },
+  { ...createEntry('dictation', new Date(2026, 9, 25, 8, 40), 'mobile-d2'), status: 'done', title: 'Wispra (phone)', text: 'Book the table for Saturday at seven.', durationMs: 4_000 },
 ];
 
 function page(name: string, css: string, body: string): void {
   fs.mkdirSync(OUT, { recursive: true });
-  const html = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${name}</title>
-<style>html,body{margin:0;height:100%;background:#0f1117}#root{display:flex;flex-direction:column;width:390px;height:844px;overflow:hidden;background:#0f1117;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}</style>
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${name}</title>
+<style>html,body{margin:0;height:100%;background:#0f1117}#root{display:flex;flex-direction:column;width:100vw;height:100vh;overflow:hidden;background:#0f1117;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}</style>
 <style id="rnw">${css}</style></head><body><div id="root">${body}</div></body></html>`;
   fs.writeFileSync(path.join(OUT, `${name}.html`), html);
 }
@@ -151,6 +178,16 @@ function WithBar({ children }: { children: React.ReactNode }) {
       <WispraTabs />
     </View>
   );
+}
+
+// The page is drawn in jsdom, which drops the "-webkit-line-clamp" that numberOfLines becomes: read it back
+// from the React props and write it into the style attribute, so the picture cuts long text as the phone does
+function keepLineClamps(container: HTMLElement): void {
+  for (const el of Array.from(container.querySelectorAll<HTMLElement>('*'))) {
+    const key = Object.keys(el).find((k) => k.startsWith('__reactProps$'));
+    const clamp = key ? ((el as unknown as Record<string, { style?: { WebkitLineClamp?: number } }>)[key]?.style?.WebkitLineClamp ?? null) : null;
+    if (clamp) el.setAttribute('style', `${el.getAttribute('style') ?? ''};-webkit-line-clamp:${clamp}`);
+  }
 }
 
 function textOf(el: Element): string {
@@ -188,43 +225,52 @@ async function shot(name: string, element: React.ReactElement, steps: (c: HTMLEl
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
+  keepLineClamps(container);
   const sheet = (StyleSheet as unknown as { getSheet(): { textContent: string } }).getSheet();
   page(name, sheet.textContent, container.innerHTML);
   await act(async () => root.unmount());
   container.remove();
 }
 
-describe('pictures of the Notes screens', () => {
-  it('the list', async () => {
-    mockEntries = LIST;
-    await shot('1-list', <WithBar><NotesScreen /></WithBar>);
-    expect(fs.existsSync(path.join(OUT, '1-list.html'))).toBe(true);
+describe('pictures of the Notes screens, with Meetings and History beside them', () => {
+  it('the three tabs in the same frame', async () => {
+    mockEntries = [...MEETINGS, ...LIST, ...DICTATIONS];
+    mockTab = 'meetings';
+    await shot('1-meetings', <WithBar><MeetingsScreen /></WithBar>);
+    mockTab = 'notes';
+    await shot('2-notes', <WithBar><NotesScreen /></WithBar>);
+    mockTab = 'history';
+    await shot('3-history', <WithBar><HistoryScreen /></WithBar>);
+    mockTab = 'notes';
+    expect(fs.existsSync(path.join(OUT, '2-notes.html'))).toBe(true);
   });
 
   it('recording, and a note not written out yet', async () => {
-    mockEntries = [note('mobile-n5', 'Ghi chú 16:05', new Date(2026, 9, 25, 16, 5), {}, { status: 'pending', text: null }), ...LIST];
+    mockEntries = [note('mobile-n5', 'Note 16:05', new Date(2026, 9, 25, 16, 5), {}, { status: 'pending', text: null }), ...LIST];
     mockPhase = 'recording';
-    await shot('2-recording', <WithBar><NotesScreen /></WithBar>);
+    await shot('4-notes-recording', <WithBar><NotesScreen /></WithBar>);
     mockPhase = 'idle';
   });
 
-  it('a note: the words as said, the expert outline, the status menu, the map', async () => {
-    mockEntries = LIST;
+  it('a meeting beside a note: the words as said, the expert outline, the status menu, the mind map', async () => {
+    mockEntries = [...MEETINGS, ...LIST];
+    mockId = 'mobile-m1';
+    await shot('5-meeting', <MeetingScreen />);
     mockId = 'mobile-n1';
-    await shot('3-note-verbatim', <NoteScreen />);
-    await shot('4-note-expert', <NoteScreen />, async (c) => {
-      await press(c, 'Chuyên gia');
+    await shot('6-note-original', <NoteScreen />);
+    await shot('7-note-expert', <NoteScreen />, async (c) => {
+      await press(c, 'Expert');
     });
-    await shot('5-note-menu', <NoteScreen />, async (c) => {
-      await press(c, 'Chuyên gia');
-      await press(c, 'Trạng thái: Mới');
+    await shot('8-note-menu', <NoteScreen />, async (c) => {
+      await press(c, 'Expert');
+      await press(c, 'Status: New');
     });
-    await shot('6-note-map', <NoteScreen />, async (c) => {
-      await press(c, 'Sơ đồ');
+    await shot('9-note-mind-map', <NoteScreen />, async (c) => {
+      await press(c, 'Mind map');
     });
-    await shot('7-note-article-empty', <NoteScreen />, async (c) => {
-      await press(c, 'Chuyên gia');
-      await press(c, 'Bài viết');
+    await shot('10-note-post-empty', <NoteScreen />, async (c) => {
+      await press(c, 'Expert');
+      await press(c, 'Post');
     });
   });
 });

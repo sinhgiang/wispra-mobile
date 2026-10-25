@@ -125,11 +125,11 @@ jest.mock('@/lib/note-ai', () => ({
   },
   makeExpertArticle: async () => {
     mockAiCalls.push('article');
-    return 'Bài viết';
+    return 'Post';
   },
   makeNoteMap: async () => {
     mockAiCalls.push('map');
-    return { map: { title: 'Sơ đồ', topics: [{ label: 'Một' }], decisions: [], actions: [], questions: [], branchLabels: { decisions: 'a', actions: 'b', questions: 'c' } } };
+    return { map: { title: 'Mind map', topics: [{ label: 'Một' }], decisions: [], actions: [], questions: [], branchLabels: { decisions: 'a', actions: 'b', questions: 'c' } } };
   },
 }));
 jest.mock('@/modules/wispra-dictation', () => ({ canSplitAudio: false, splitAudio: jest.fn() }));
@@ -212,7 +212,7 @@ describe('a note is saved on the phone first', () => {
     await start();
     mockOnline = false;
     await recordNote('mobile-n1');
-    expect(noteOf('mobile-n1')).toMatchObject({ kind: 'note', status: 'pending', audioUri: 'file:///wispra/audio/note.m4a', title: 'Ghi chú 14:32' });
+    expect(noteOf('mobile-n1')).toMatchObject({ kind: 'note', status: 'pending', audioUri: 'file:///wispra/audio/note.m4a', title: 'Note 14:32' });
     // It reached the disk (the list was saved with the note in it) before anything else happened
     expect(mockSaves.some((list) => list.some((e) => e.id === 'mobile-n1' && e.status === 'pending'))).toBe(true);
     expect(mockCloudCalls).toEqual([]);
@@ -255,7 +255,7 @@ describe('a note is saved on the phone first', () => {
 });
 
 describe('the status is only kept', () => {
-  it('Giữ lại, Phát triển, Dùng cho dự án and Nhắc lại sau 3 ngày are saved on the note and shared; nothing else is sent or scheduled', async () => {
+  it('Keep, Phát triển, Use for a project and Remind me in 3 days are saved on the note and shared; nothing else is sent or scheduled', async () => {
     await start();
     await signIn(ANNA);
     await recordNote('mobile-n1');
@@ -288,10 +288,10 @@ describe('the AI work the person asks for', () => {
     await act(async () => api.writeNote('mobile-n1', 'map'));
     await settle(() => !!JSON.parse(mockRowsOf('anna').get('mobile-n1')!.rawText!).mindMap);
     expect(noteOf('mobile-n1').note?.articles).toHaveLength(3);
-    expect(noteOf('mobile-n1').note?.mindMap?.title).toBe('Sơ đồ');
+    expect(noteOf('mobile-n1').note?.mindMap?.title).toBe('Mind map');
     const payload = JSON.parse(mockRowsOf('anna').get('mobile-n1')!.rawText!);
     expect(payload.articles).toHaveLength(3);
-    expect(payload.mindMap.title).toBe('Sơ đồ');
+    expect(payload.mindMap.title).toBe('Mind map');
   });
 
   it('a role the person chose is used from then on and survives a rewrite', async () => {
@@ -311,7 +311,7 @@ describe('the AI work the person asks for', () => {
     mockEntries = [{ ...createEntry('note', new Date(2026, 9, 25, 14, 32), 'mobile-n1'), status: 'done', text: 'Một ý' }];
     await start();
     await act(async () => api.writeNote('mobile-n1', 'outline'));
-    expect(noteOf('mobile-n1').note?.error).toMatch(/Đăng nhập/);
+    expect(noteOf('mobile-n1').note?.error).toMatch(/Sign in/);
     expect(noteOf('mobile-n1').text).toBe('Một ý');
     expect(mockAiCalls).toEqual([]);
   });

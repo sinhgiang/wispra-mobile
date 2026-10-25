@@ -11,13 +11,12 @@ import { SummaryText, TabChips } from '@/components/wispra/meeting-views';
 import { Body, Button, Card, Chip, ui } from '@/components/wispra/ui';
 import { StatusPill } from '@/components/wispra/note-card';
 import { Gap, W } from '@/constants/wispra';
-import { needsTranscription, type Entry } from '@/lib/entries';
+import { formatDate, needsTranscription, type Entry } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
 import { deleteOneWarning } from '@/lib/history-delete';
 import { downloadMap } from '@/lib/note-export';
 import {
   copyText,
-  formatNoteDate,
   NOTE_STATUSES,
   NOTE_TEXT,
   shownArticle,
@@ -37,7 +36,7 @@ const TABS: { value: NoteView; label: string }[] = [
   { value: 'map', label: NOTE_TEXT.map },
 ];
 
-// The statuses the menu offers; "Mới" is where every note starts
+// The statuses the menu offers; "New" is where every note starts
 const MENU_STATUSES = NOTE_STATUSES.filter((s) => s.value !== 'new');
 
 export default function NoteScreen() {
@@ -83,21 +82,18 @@ export default function NoteScreen() {
             <Text style={styles.roundText}>‹</Text>
           </Pressable>
           <View style={styles.headText}>
-            <Text style={styles.title} numberOfLines={2}>
+            <Text style={styles.title} numberOfLines={1}>
               {entry.title}
             </Text>
+            <Text style={styles.meta} numberOfLines={1}>
+              {formatDate(entry.createdAt)}
+              {entry.note?.domain ? ` · ${entry.note.domain}` : ''}
+            </Text>
           </View>
+          <StatusMenu entry={entry} />
           <Pressable accessibilityRole="button" accessibilityLabel={NOTE_TEXT.share} onPress={share} style={styles.round}>
             <Text style={styles.shareText}>↗</Text>
           </Pressable>
-        </View>
-
-        <View style={styles.metaRow}>
-          <Text style={styles.meta} numberOfLines={1}>
-            {formatNoteDate(entry.createdAt)}
-            {entry.note?.domain ? ` · ${entry.note.domain}` : ''}
-          </Text>
-          <StatusMenu entry={entry} />
         </View>
 
         <TabChips tabs={TABS} value={tab} onChange={setTab} />
@@ -108,7 +104,7 @@ export default function NoteScreen() {
             <Card style={styles.errorCard}>
               <Text style={styles.errorText}>{entry.note.error}</Text>
               <View style={ui.row}>
-                <Button small kind="primary" label="Thử lại" disabled={working} onPress={tryAgain} />
+                <Button small kind="primary" label={NOTE_TEXT.tryAgain} disabled={working} onPress={tryAgain} />
               </View>
             </Card>
           ) : null}
@@ -133,7 +129,7 @@ function WaitingCard({ entry, onRetry }: { entry: Entry; onRetry: () => void }) 
       <Body style={styles.note}>{working ? NOTE_TEXT.transcribing : (entry.error ?? (needsTranscription(entry) ? NOTE_TEXT.savedWaiting : NOTE_TEXT.noText))}</Body>
       {needsTranscription(entry) ? (
         <View style={ui.row}>
-          <Button small kind="primary" label={working ? 'Đang thử…' : 'Thử lại'} disabled={working} onPress={onRetry} />
+          <Button small kind="primary" label={working ? NOTE_TEXT.trying : NOTE_TEXT.tryAgain} disabled={working} onPress={onRetry} />
         </View>
       ) : null}
     </Card>
@@ -154,7 +150,7 @@ function StatusMenu({ entry }: { entry: Entry }) {
     <View style={styles.menuWrap}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Trạng thái: ${NOTE_STATUSES.find((s) => s.value === status)?.label ?? ''}`}
+        accessibilityLabel={`${NOTE_TEXT.statusLabel}: ${NOTE_STATUSES.find((s) => s.value === status)?.label ?? ''}`}
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen((o) => !o)}
         style={styles.pillButton}>
@@ -298,6 +294,7 @@ function ExpertTab({
 
       {content ? (
         <Card>
+          <Text style={styles.section}>{sub === 'outline' ? NOTE_TEXT.outline : NOTE_TEXT.article}</Text>
           <SummaryText text={content} />
           <View style={ui.row}>
             <CopyButton text={content} />
@@ -353,7 +350,7 @@ function MapTab({ entry, working }: { entry: Entry; working: boolean }) {
         },
       });
     } catch (err) {
-      Alert.alert('Chưa tải xuống được', err instanceof Error ? err.message : String(err));
+      Alert.alert(NOTE_TEXT.downloadFailed, err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -397,20 +394,19 @@ function MapTab({ entry, working }: { entry: Entry; working: boolean }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: Gap.m, paddingHorizontal: Gap.xl, paddingTop: Gap.xl, paddingBottom: Gap.xs },
+  header: { flexDirection: 'row', alignItems: 'center', gap: Gap.m, paddingHorizontal: Gap.xl, paddingTop: Gap.xl, paddingBottom: Gap.xs, zIndex: 20, elevation: 20 },
   round: { width: 40, height: 40, borderRadius: 20, backgroundColor: W.surface, alignItems: 'center', justifyContent: 'center' },
   roundText: { color: W.text, fontSize: 22, lineHeight: 24 },
   shareText: { color: W.text, fontSize: 15 },
   headText: { flex: 1, minWidth: 0 },
   title: { color: W.text, fontSize: 18, fontWeight: '700' },
-  metaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Gap.s, paddingHorizontal: Gap.xl, paddingBottom: Gap.s, zIndex: 20, elevation: 20 },
-  meta: { flex: 1, color: W.muted, fontSize: 12 },
+  meta: { color: W.muted, fontSize: 12 },
   menuWrap: { alignItems: 'flex-end' },
   pillButton: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 32 },
   caret: { color: W.muted, fontSize: 12 },
   menu: {
     position: 'absolute',
-    top: 36,
+    top: 40,
     right: 0,
     width: 230,
     padding: 4,
@@ -425,7 +421,8 @@ const styles = StyleSheet.create({
   menuItemOn: { backgroundColor: '#272a52' },
   menuLabel: { color: W.text, fontSize: 13 },
   menuHint: { color: W.muted, fontSize: 11, marginTop: 1 },
-  body: { paddingHorizontal: Gap.xl, paddingTop: Gap.s, paddingBottom: Gap.xl, gap: Gap.m },
+  body: { paddingHorizontal: Gap.xl, paddingBottom: Gap.l, gap: Gap.m },
+  section: { color: W.accentSoft, fontSize: 13, fontWeight: '600' },
   text: { color: W.text, fontSize: 14, lineHeight: 21 },
   note: { color: W.muted, fontSize: 13, lineHeight: 19 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Gap.s },

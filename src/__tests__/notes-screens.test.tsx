@@ -41,6 +41,7 @@ jest.mock('expo-clipboard', () => ({
 jest.mock('expo-file-system', () => ({ File: class {}, Directory: class {}, Paths: { cache: 'cache' } }));
 jest.mock('expo-audio', () => ({ useAudioPlayer: () => ({}), useAudioPlayerStatus: () => ({}) }));
 jest.mock('@/lib/storage', () => ({ audioExists: () => true }));
+jest.mock('@/components/wispra/setup-reminders', () => ({ SetupReminders: () => null }));
 jest.mock('@/lib/use-session', () => ({ useSession: () => (mockSignedIn ? { email: 'anna@example.com' } : null) }));
 jest.mock('@/lib/transcriber', () => ({ transcriptionAvailable: () => mockSignedIn }));
 jest.mock('@/lib/use-recording', () => ({
@@ -69,7 +70,11 @@ import NotesScreen from '@/app/(tabs)/notes';
 // eslint-disable-next-line import/first
 import NoteScreen from '@/app/note/[id]';
 // eslint-disable-next-line import/first
-import { createEntry } from '@/lib/entries';
+import { createEntry, defaultNoteTitle } from '@/lib/entries';
+// eslint-disable-next-line import/first
+import { deleteOneWarning } from '@/lib/history-delete';
+// eslint-disable-next-line import/first
+import { NOTE_STATUSES, NOTE_TEXT } from '@/lib/notes';
 
 const SAID = 'Tôi muốn làm nền tảng cho người địa phương tự đăng tour và tự dẫn khách.';
 const MAP = {
@@ -104,19 +109,20 @@ beforeEach(() => {
 });
 
 describe('the Notes tab', () => {
-  it('lists the notes with their title, the day and moment they were said, the field and the status', async () => {
+  it('lists the notes in the same cards as Meetings and History: title, the moment, the words, and under them the field and the status', async () => {
     mockEntries = [
       note(),
       note({ id: 'mobile-n2', title: 'Gói bảo dưỡng ô tô theo km', createdAt: new Date(2026, 9, 23, 8, 51).toISOString() }, { domain: 'Ô tô', status: 'keep' }),
     ];
     await render(<NotesScreen />);
-    expect(screen.getByText('Ghi chú')).toBeTruthy();
+    expect(screen.getByText('Notes')).toBeTruthy();
     expect(screen.getByText('Nền tảng tour do người địa phương dẫn')).toBeTruthy();
-    expect(screen.getByText('CN, 25/10/2026 · 14:32')).toBeTruthy();
+    expect(screen.getByText('14:32')).toBeTruthy();
+    expect(screen.getAllByText('NOTE')).toHaveLength(2);
     expect(screen.getByText('Du lịch')).toBeTruthy();
-    expect(screen.getByText('Mới')).toBeTruthy();
+    expect(screen.getByText('New')).toBeTruthy();
     expect(screen.getByText('Ô tô')).toBeTruthy();
-    expect(screen.getByText('Giữ lại')).toBeTruthy();
+    expect(screen.getByText('Keep')).toBeTruthy();
   });
 
   it('shows the newest first and opens a note when it is touched', async () => {
@@ -137,45 +143,46 @@ describe('the Notes tab', () => {
 
   it('starts a note from the mic; while it is recording it can be stopped and saved, or thrown away', async () => {
     await render(<NotesScreen />);
-    await fireEvent.press(screen.getByLabelText('Bắt đầu ghi chú'));
+    await fireEvent.press(screen.getByText('Record a note'));
     expect(mockStart).toHaveBeenCalledTimes(1);
   });
 
   it('says "saved on the phone" the moment it is stopped, whether or not anyone is signed in', async () => {
     mockPhase = 'recording';
     const view = await render(<NotesScreen />);
-    expect(screen.getByText('Đang nghe · 0:04')).toBeTruthy();
+    expect(screen.getByText('Listening · 0:04')).toBeTruthy();
     await act(async () => {
-      await fireEvent.press(screen.getByLabelText('Dừng và lưu'));
+      await fireEvent.press(screen.getByText('Stop and save'));
     });
     expect(mockStop).toHaveBeenCalledTimes(1);
     mockPhase = 'idle';
     await view.rerender(<NotesScreen />);
-    expect(screen.getByText('Đã lưu trên máy. Đang chép chữ…')).toBeTruthy();
+    expect(screen.getByText('Saved on this phone. Transcribing…')).toBeTruthy();
 
     mockSignedIn = false;
     mockPhase = 'recording';
     await view.rerender(<NotesScreen />);
     await act(async () => {
-      await fireEvent.press(screen.getByLabelText('Dừng và lưu'));
+      await fireEvent.press(screen.getByText('Stop and save'));
     });
     mockPhase = 'idle';
     await view.rerender(<NotesScreen />);
-    expect(screen.getByText(/^Đã lưu trên máy\. Đăng nhập Wispra Cloud/)).toBeTruthy();
+    expect(screen.getByText(/^Saved on this phone[.] Sign in to Wispra Cloud/)).toBeTruthy();
   });
 
   it('a recording not written out yet is a card that says it is safe on the phone, and can be tried again', async () => {
-    mockEntries = [{ ...note(), status: 'pending', text: null, title: 'Ghi chú 14:32', note: { status: 'new' } }];
+    mockEntries = [{ ...note(), status: 'pending', text: null, title: 'Note 14:32', note: { status: 'new' } }];
     await render(<NotesScreen />);
-    expect(screen.getByText('Đã lưu trên máy. Chờ chép chữ.')).toBeTruthy();
-    await fireEvent.press(screen.getByText('Thử lại'));
+    expect(screen.getByText('Note 14:32 not transcribed yet · 0:21')).toBeTruthy();
+    expect(screen.getByText('The audio is kept on this phone.')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Try again'));
     expect(mockRetry).toHaveBeenCalledWith('mobile-n1');
   });
 
   it('has an empty state that says what to do', async () => {
     mockEntries = [];
     await render(<NotesScreen />);
-    expect(screen.getByText('Chưa có ghi chú nào')).toBeTruthy();
+    expect(screen.getByText('No notes yet')).toBeTruthy();
   });
 });
 
@@ -194,141 +201,143 @@ describe('a note: three views, laid out like a meeting', () => {
   it('has the title, the moment and field, a share button, and the three tabs', async () => {
     await render(<NoteScreen />);
     expect(screen.getByText('Nền tảng tour do người địa phương dẫn')).toBeTruthy();
-    expect(screen.getByText('CN, 25/10/2026 · 14:32 · Du lịch')).toBeTruthy();
-    expect(screen.getByLabelText('Chia sẻ')).toBeTruthy();
+    expect(screen.getByText('25 Oct 2026 · Du lịch')).toBeTruthy();
+    expect(screen.getByLabelText('Share')).toBeTruthy();
     expect(screen.getByTestId('meeting-tabs')).toBeTruthy();
-    for (const tab of ['Nguyên văn', 'Chuyên gia', 'Sơ đồ']) expect(screen.getByText(tab)).toBeTruthy();
+    for (const tab of ['Original', 'Expert', 'Mind map']) expect(screen.getByText(tab)).toBeTruthy();
   });
 
-  it('Nguyên văn shows the words as they were said, and Sao chép copies exactly them', async () => {
+  it('Original shows the words as they were said, and Copy copies exactly them', async () => {
     await render(<NoteScreen />);
     expect(screen.getByText(SAID)).toBeTruthy();
     await act(async () => {
-      await fireEvent.press(screen.getByText('Sao chép'));
+      await fireEvent.press(screen.getByText('Copy'));
     });
     expect(mockCopied).toEqual([SAID]);
-    expect(screen.getByText('Đã sao chép')).toBeTruthy();
+    expect(screen.getByText('Copied')).toBeTruthy();
   });
 
-  it('Chuyên gia shows the Dàn ý and Bài viết chips, the role that can be changed, and copies the outline', async () => {
+  it('Expert shows the Outline and Post chips, the role that can be changed, and copies the outline', async () => {
     await render(<NoteScreen />);
-    await fireEvent.press(screen.getByText('Chuyên gia'));
-    expect(screen.getByText('Dàn ý')).toBeTruthy();
-    expect(screen.getByText('Bài viết')).toBeTruthy();
-    expect(screen.getByText(/Đang viết dưới vai: chuyên gia phát triển thị trường du lịch\./)).toBeTruthy();
-    expect(screen.getByText('Đổi vai')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Expert'));
+    // The chips, and the heading of the card the outline is in
+    expect(screen.getByRole('button', { name: 'Outline' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Post' })).toBeTruthy();
+    expect(screen.getAllByText('Outline')).toHaveLength(2);
+    expect(screen.getByText(/Writing as: chuyên gia phát triển thị trường du lịch\./)).toBeTruthy();
+    expect(screen.getByText('Change role')).toBeTruthy();
     expect(screen.getByText('Ý chính')).toBeTruthy();
     await act(async () => {
-      await fireEvent.press(screen.getByText('Sao chép'));
+      await fireEvent.press(screen.getByText('Copy'));
     });
     expect(mockCopied).toEqual(['## Ý chính\n- Nền tảng tour']);
     // The AI’s rewrite never takes the place of the words, and the page says where it was written
-    expect(screen.getByText(/AI của Wispra Cloud viết; nguyên văn lời bạn nói luôn được giữ nguyên/)).toBeTruthy();
+    expect(screen.getByText(/Rewrites are written by Wispra Cloud’s AI. Your original words are always kept/)).toBeTruthy();
   });
 
-  it('Viết lại writes the outline again; Bài viết has its own copy of the work, with versions', async () => {
+  it('Rewrite writes the outline again; Post has its own copy of the work, with versions', async () => {
     mockEntries = [note({}, { articles: ['Bài một', 'Bài hai'] })];
     await render(<NoteScreen />);
-    await fireEvent.press(screen.getByText('Chuyên gia'));
-    await fireEvent.press(screen.getByText('Viết lại'));
+    await fireEvent.press(screen.getByText('Expert'));
+    await fireEvent.press(screen.getByText('Rewrite'));
     expect(mockWriteNote).toHaveBeenCalledWith('mobile-n1', 'outline');
 
-    await fireEvent.press(screen.getByText('Bài viết'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Post' }));
     expect(screen.getByText('Bài hai')).toBeTruthy();
-    expect(screen.getByText('Bản 1')).toBeTruthy();
-    expect(screen.getByText('Bản 2')).toBeTruthy();
-    await fireEvent.press(screen.getByText('Bản 1'));
+    expect(screen.getByText('Version 1')).toBeTruthy();
+    expect(screen.getByText('Version 2')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Version 1'));
     expect(screen.getByText('Bài một')).toBeTruthy();
     await act(async () => {
-      await fireEvent.press(screen.getByText('Sao chép'));
+      await fireEvent.press(screen.getByText('Copy'));
     });
     expect(mockCopied).toEqual(['Bài một']);
-    await fireEvent.press(screen.getByText('Viết lại'));
+    await fireEvent.press(screen.getByText('Rewrite'));
     expect(mockWriteNote).toHaveBeenLastCalledWith('mobile-n1', 'article');
   });
 
   it('an article not written yet is offered, not written without being asked', async () => {
     await render(<NoteScreen />);
-    await fireEvent.press(screen.getByText('Chuyên gia'));
-    await fireEvent.press(screen.getByText('Bài viết'));
+    await fireEvent.press(screen.getByText('Expert'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Post' }));
     expect(mockWriteNote).not.toHaveBeenCalled();
-    await fireEvent.press(screen.getByText('Viết bài'));
+    await fireEvent.press(screen.getByText('Write the post'));
     expect(mockWriteNote).toHaveBeenCalledWith('mobile-n1', 'article');
   });
 
   it('the role can be changed: the note is written again as the new expert', async () => {
     await render(<NoteScreen />);
-    await fireEvent.press(screen.getByText('Chuyên gia'));
-    await fireEvent.press(screen.getByText('Đổi vai'));
-    await fireEvent.changeText(screen.getByLabelText('Đang viết dưới vai:'), '  luật sư du lịch ');
-    await fireEvent.press(screen.getByText('Lưu và viết lại'));
+    await fireEvent.press(screen.getByText('Expert'));
+    await fireEvent.press(screen.getByText('Change role'));
+    await fireEvent.changeText(screen.getByLabelText('Writing as:'), '  luật sư du lịch ');
+    await fireEvent.press(screen.getByText('Save and rewrite'));
     expect(mockWriteNote).toHaveBeenCalledWith('mobile-n1', 'outline', 'luật sư du lịch');
   });
 
-  it('Sơ đồ draws the map with Tải xuống and Vẽ lại; the map is the one the meetings draw', async () => {
+  it('Mind map draws the map with Download and Redraw; the map is the one the meetings draw', async () => {
     mockEntries = [note({}, { mindMap: MAP })];
     await render(<NoteScreen />);
-    await fireEvent.press(screen.getByText('Sơ đồ'));
+    await fireEvent.press(screen.getByText('Mind map'));
     expect(screen.getByTestId('mind-map-canvas')).toBeTruthy();
     expect(screen.getByText('Fit')).toBeTruthy();
     await act(async () => {
-      await fireEvent.press(screen.getByText('Tải xuống'));
+      await fireEvent.press(screen.getByText('Download'));
     });
     expect(mockDownload).toHaveBeenCalledTimes(1);
     const [map, title, deps] = mockDownload.mock.calls[0] as unknown as [{ title: string }, string, { platform: string }];
     expect(map.title).toBe('Nền tảng tour');
     expect(title).toBe('Nền tảng tour do người địa phương dẫn');
     expect(['ios', 'android', 'other']).toContain(deps.platform);
-    await fireEvent.press(screen.getByText('Vẽ lại'));
+    await fireEvent.press(screen.getByText('Redraw'));
     expect(mockWriteNote).toHaveBeenCalledWith('mobile-n1', 'map');
   });
 
   it('a map not drawn yet is offered; one that stayed invalid is shown as text, with a way to draw it again', async () => {
     await render(<NoteScreen />);
-    await fireEvent.press(screen.getByText('Sơ đồ'));
-    await fireEvent.press(screen.getByText('Vẽ sơ đồ'));
+    await fireEvent.press(screen.getByText('Mind map'));
+    await fireEvent.press(screen.getByText('Draw the mind map'));
     expect(mockWriteNote).toHaveBeenCalledWith('mobile-n1', 'map');
 
     mockEntries = [note({}, { mapText: '- Một ý\n  - Ý nhỏ' })];
     mockWriteNote.mockClear();
     const view = await render(<NoteScreen />);
-    await fireEvent.press(screen.getAllByText('Sơ đồ')[screen.getAllByText('Sơ đồ').length - 1]);
-    expect(screen.getByText(/chưa vẽ được sơ đồ hợp lệ/)).toBeTruthy();
+    await fireEvent.press(screen.getAllByText('Mind map')[screen.getAllByText('Mind map').length - 1]);
+    expect(screen.getByText(/could not draw a valid mind map/)).toBeTruthy();
     expect(screen.getByText('- Một ý\n  - Ý nhỏ')).toBeTruthy();
-    expect(screen.queryByText('Tải xuống')).toBeNull();
+    expect(screen.queryByText('Download')).toBeNull();
     view.unmount();
   });
 
   it('shows what the AI work cost the account’s allowance, once it has run', async () => {
     mockEntries = [note({}, { usage: { outline: { tokens: 2412, at: '2026-10-25T08:00:00.000Z' } } })];
     await render(<NoteScreen />);
-    await fireEvent.press(screen.getByText('Chuyên gia'));
-    expect(screen.getByText('Lượt này dùng khoảng 2,412 token AI của tài khoản.')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Expert'));
+    expect(screen.getByText('This used about 2,412 AI tokens of your allowance.')).toBeTruthy();
   });
 
   it('a failed AI try says why, in place, and can be tried again', async () => {
     mockEntries = [note({}, { error: 'Wispra Cloud: busy' })];
     await render(<NoteScreen />);
-    await fireEvent.press(screen.getByText('Chuyên gia'));
+    await fireEvent.press(screen.getByText('Expert'));
     expect(screen.getByText('Wispra Cloud: busy')).toBeTruthy();
-    await fireEvent.press(screen.getByText('Thử lại'));
+    await fireEvent.press(screen.getByText('Try again'));
     expect(mockWriteNote).toHaveBeenCalledWith('mobile-n1', 'outline');
   });
 
   it('a note whose words have not arrived says so and does not offer the AI', async () => {
     mockEntries = [{ ...note(), status: 'pending', text: null, note: { status: 'new' } }];
     await render(<NoteScreen />);
-    expect(screen.getByText('Đã lưu trên máy. Chờ chép chữ.')).toBeTruthy();
-    await fireEvent.press(screen.getByText('Chuyên gia'));
-    expect(screen.queryByText('Viết dàn ý')).toBeNull();
-    await fireEvent.press(screen.getByText('Thử lại'));
+    expect(screen.getByText('Saved on this phone. Waiting to be transcribed.')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Expert'));
+    expect(screen.queryByText('Write the outline')).toBeNull();
+    await fireEvent.press(screen.getByText('Try again'));
     expect(mockRetry).toHaveBeenCalledWith('mobile-n1');
   });
 
   it('shares the title and what is on show', async () => {
     const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' });
     await render(<NoteScreen />);
-    await fireEvent.press(screen.getByLabelText('Chia sẻ'));
+    await fireEvent.press(screen.getByLabelText('Share'));
     expect(share).toHaveBeenCalledWith({ message: `Nền tảng tour do người địa phương dẫn\n\n${SAID}` });
   });
 });
@@ -336,19 +345,19 @@ describe('a note: three views, laid out like a meeting', () => {
 describe('the status button', () => {
   it('shows where the note stands, and opens exactly four choices', async () => {
     await render(<NoteScreen />);
-    expect(screen.getByLabelText('Trạng thái: Mới')).toBeTruthy();
+    expect(screen.getByLabelText('Status: New')).toBeTruthy();
     expect(screen.queryByTestId('note-status-menu')).toBeNull();
-    await fireEvent.press(screen.getByLabelText('Trạng thái: Mới'));
+    await fireEvent.press(screen.getByLabelText('Status: New'));
     expect(screen.getByTestId('note-status-menu')).toBeTruthy();
     expect(screen.getAllByRole('menuitem').map((n) => n.props.accessibilityState?.selected)).toEqual([false, false, false, false]);
-    for (const label of ['Giữ lại', 'Phát triển thành sản phẩm', 'Dùng cho dự án', 'Nhắc lại sau 3 ngày']) expect(screen.getByText(label)).toBeTruthy();
+    for (const label of ['Keep', 'Develop into a product', 'Use for a project', 'Remind me in 3 days']) expect(screen.getByText(label)).toBeTruthy();
   });
 
   it('choosing one keeps it and closes the menu; the hint says it is only a mark', async () => {
     await render(<NoteScreen />);
-    await fireEvent.press(screen.getByLabelText('Trạng thái: Mới'));
-    expect(screen.getByText('Chỉ đánh dấu, chưa có thông báo nhắc')).toBeTruthy();
-    await fireEvent.press(screen.getByText('Phát triển thành sản phẩm'));
+    await fireEvent.press(screen.getByLabelText('Status: New'));
+    expect(screen.getByText('Only marked: no reminder is sent yet')).toBeTruthy();
+    await fireEvent.press(screen.getByText('Develop into a product'));
     expect(mockSetNoteStatus).toHaveBeenCalledWith('mobile-n1', 'develop');
     expect(screen.queryByTestId('note-status-menu')).toBeNull();
   });
@@ -356,8 +365,8 @@ describe('the status button', () => {
   it('shows the status that was chosen before', async () => {
     mockEntries = [note({}, { status: 'remind' })];
     await render(<NoteScreen />);
-    expect(screen.getByLabelText('Trạng thái: Nhắc lại sau 3 ngày')).toBeTruthy();
-    await fireEvent.press(screen.getByLabelText('Trạng thái: Nhắc lại sau 3 ngày'));
+    expect(screen.getByLabelText('Status: Remind me in 3 days')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('Status: Remind me in 3 days'));
     expect(screen.getAllByRole('menuitem').map((n) => n.props.accessibilityState?.selected)).toEqual([false, false, false, true]);
   });
 });
@@ -384,7 +393,37 @@ describe('step 1 sends no reminder', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('the status menu says out loud that "Nhắc lại sau 3 ngày" is only a mark for now', () => {
-    expect(read('src/lib/notes.ts')).toContain("hint: 'Chỉ đánh dấu, chưa có thông báo nhắc'");
+  it('the status menu says out loud that "Remind me in 3 days" is only a mark for now', () => {
+    expect(read('src/lib/notes.ts')).toContain("hint: 'Only marked: no reminder is sent yet'");
+  });
+});
+
+describe('the words of the tab are English, like the other tabs (T-0985)', () => {
+  // Vietnamese is told apart by its own letters; what a person says in a note stays in their language,
+  // but nothing the app itself writes may
+  const VIETNAMESE = /[ăâđêôơưàáạảãầấậẩẫằắặẳẵèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]/i;
+  const root = path.resolve(__dirname, '..', '..');
+
+  it('every label, hint and message in NOTE_TEXT and the statuses', () => {
+    const words: string[] = [];
+    for (const value of Object.values(NOTE_TEXT)) words.push(typeof value === 'function' ? value(1234) : value);
+    for (const s of NOTE_STATUSES) words.push(s.label, s.short, s.hint);
+    expect(words.length).toBeGreaterThan(60);
+    expect(words.filter((w) => VIETNAMESE.test(w))).toEqual([]);
+    expect(NOTE_TEXT.tab).toBe('Notes');
+    expect(NOTE_STATUSES.map((s) => s.label)).toEqual(['New', 'Keep', 'Develop into a product', 'Use for a project', 'Remind me in 3 days']);
+  });
+
+  it('the warnings before deleting a note, and its placeholder title', () => {
+    const warnings = [true, false].flatMap((signedIn) => [note({ syncedAt: 'x' }), note()].map((n) => deleteOneWarning(n, signedIn)));
+    for (const w of warnings) expect(VIETNAMESE.test(`${w.title} ${w.message} ${w.confirm}`)).toBe(false);
+    expect(defaultNoteTitle(new Date(2026, 9, 25, 14, 32))).toBe('Note 14:32');
+  });
+
+  it('the screens and the bar write no Vietnamese of their own', () => {
+    for (const file of ['src/app/(tabs)/notes.tsx', 'src/app/note/[id].tsx', 'src/components/wispra/note-card.tsx', 'src/app/(tabs)/_layout.tsx']) {
+      const source = fs.readFileSync(path.join(root, file), 'utf8');
+      expect({ file, vietnamese: VIETNAMESE.test(source) }).toEqual({ file, vietnamese: false });
+    }
   });
 });

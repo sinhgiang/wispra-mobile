@@ -15,12 +15,13 @@ module.exports = {
   transform,
   rootDir: '../..',
   testMatch: ['<rootDir>/scripts/screens-web/*.shots.tsx'],
+  // Order matters (the first match wins): the project's own paths, then the preset's
   moduleNameMapper: {
-    // First, or the preset's catch-all for react-native/* wins and the phone's own React Native is loaded
+    // Before the preset's catch-all for react-native/*, or the phone's own React Native is loaded
     '^react-native$': 'react-native-web',
-    ...preset.moduleNameMapper,
     '^@/modules/(.*)$': '<rootDir>/modules/$1',
     '^@/assets/(.*)$': '<rootDir>/assets/$1',
     '^@/(.*)$': '<rootDir>/src/$1',
+    ...preset.moduleNameMapper,
   },
 };

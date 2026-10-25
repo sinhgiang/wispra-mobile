@@ -1,4 +1,4 @@
-// "Tải xuống" on the mind map of a note (T-0979): the picture goes to the share sheet on iPhone, the
+// "Download" on the mind map of a note (T-0979): the picture goes to the share sheet on iPhone, the
 // map goes as text where a file cannot be shared (Android), and the map view hands the screen what it
 // needs to draw the picture.
 import { describe, expect, it, jest } from '@jest/globals';
@@ -38,8 +38,8 @@ describe('downloading a map', () => {
     const { d, calls } = deps();
     expect(await downloadMap(MAP, 'Nền tảng tour', d)).toBe('image');
     expect(calls).toHaveLength(2);
-    expect(calls[0]).toMatch(/^save:AAAA:wispra-so-do-nen-tang-tour-\d+\.png$/);
-    expect(calls[1]).toMatch(/^file:file:\/\/\/cache\/wispra-so-do-nen-tang-tour-\d+\.png:Nền tảng tour$/);
+    expect(calls[0]).toMatch(/^save:AAAA:wispra-mind-map-nen-tang-tour-\d+\.png$/);
+    expect(calls[1]).toMatch(/^file:file:\/\/\/cache\/wispra-mind-map-nen-tang-tour-\d+\.png:Nền tảng tour$/);
     expect(d.shareText).not.toHaveBeenCalled();
   });
 
@@ -63,8 +63,8 @@ describe('downloading a map', () => {
 
   it('names the file from the title without accents or odd characters', () => {
     const at = new Date(1_700_000_000_000);
-    expect(mapFileName('Đường đến Cao Bằng / Sapa?', at)).toBe('wispra-so-do-duong-den-cao-bang-sapa-1700000000000.png');
-    expect(mapFileName('???', at)).toBe('wispra-so-do-ghi-chu-1700000000000.png');
+    expect(mapFileName('Đường đến Cao Bằng / Sapa?', at)).toBe('wispra-mind-map-duong-den-cao-bang-sapa-1700000000000.png');
+    expect(mapFileName('???', at)).toBe('wispra-mind-map-note-1700000000000.png');
   });
 });
 

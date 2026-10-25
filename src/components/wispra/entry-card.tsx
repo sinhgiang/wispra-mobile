@@ -1,12 +1,14 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { confirmDelete } from './confirm-delete';
+import { NoteChips } from './note-card';
 import { Button } from './ui';
 
 import { Gap, W } from '@/constants/wispra';
 import { formatDuration, formatTime, needsTranscription, previewText, type Entry } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
 import { deleteOneWarning } from '@/lib/history-delete';
+import { statusOf } from '@/lib/notes';
 import { useSession } from '@/lib/use-session';
 
 // Touch and hold an entry to delete it, after a warning that says where it is deleted
@@ -48,6 +50,7 @@ function DoneCard({ entry, onPress }: { entry: Entry; onPress?: () => void }) {
         <Text style={styles.preview} numberOfLines={2}>
           {previewText(entry)}
         </Text>
+        {note ? <NoteChips domain={entry.note?.domain} status={statusOf(entry)} /> : null}
       </View>
     </Pressable>
   );

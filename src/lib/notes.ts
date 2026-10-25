@@ -9,7 +9,7 @@
 // NOTE_APP, `text` is the words said, `topic` is the field and `rawText` carries the rest as JSON.
 // The server only ever reads and writes the rows of the account whose token it is given.
 
-import { cloudId, type Entry } from './entries';
+import { cloudId, formatDate, formatTime, type Entry } from './entries';
 import { parseMindMap, type MindMap, type MindMapItem } from './meeting';
 import type { HistoryEntry } from './history-sync';
 
@@ -19,7 +19,7 @@ export interface NoteData {
   status: NoteStatus;
   // When the status was last chosen. Nothing reads it yet: the reminders are a later step.
   statusAt?: string;
-  // The field the note belongs to ("Du lịch"), and the expert the AI writes as
+  // The field the note belongs to ("Travel"), and the expert the AI writes as
   domain?: string;
   role?: string;
   roleEdited?: boolean;
@@ -46,11 +46,11 @@ export const MAX_ARTICLES = 3;
 export const DEFAULT_ROLE = 'an expert in the field of this note';
 
 export const NOTE_STATUSES: { value: NoteStatus; label: string; short: string; hint: string }[] = [
-  { value: 'new', label: 'Mới', short: 'Mới', hint: 'Chưa quyết định' },
-  { value: 'keep', label: 'Giữ lại', short: 'Giữ lại', hint: 'Chỉ lưu ghi chú' },
-  { value: 'develop', label: 'Phát triển thành sản phẩm', short: 'Phát triển', hint: 'Đánh dấu để phát triển' },
-  { value: 'project', label: 'Dùng cho dự án', short: 'Dùng cho dự án', hint: 'Đánh dấu dùng cho dự án' },
-  { value: 'remind', label: 'Nhắc lại sau 3 ngày', short: 'Nhắc sau 3 ngày', hint: 'Chỉ đánh dấu, chưa có thông báo nhắc' },
+  { value: 'new', label: 'New', short: 'New', hint: 'Not decided yet' },
+  { value: 'keep', label: 'Keep', short: 'Keep', hint: 'Only saved' },
+  { value: 'develop', label: 'Develop into a product', short: 'Develop', hint: 'Marked to develop' },
+  { value: 'project', label: 'Use for a project', short: 'For a project', hint: 'Marked for a project' },
+  { value: 'remind', label: 'Remind me in 3 days', short: 'Remind in 3 days', hint: 'Only marked: no reminder is sent yet' },
 ];
 
 export function statusOf(entry: Entry): NoteStatus {
@@ -62,56 +62,61 @@ export function statusLabel(status: NoteStatus, short = false): string {
   return short ? row.short : row.label;
 }
 
-// All the words of the Notes tab in one place
+// All the words of the Notes tab in one place (English, like the other tabs; what the person said and
+// what the AI writes from it stay in the language of the person)
 export const NOTE_TEXT = {
-  tab: 'Ghi chú',
-  title: 'Ghi chú',
-  listEmptyTitle: 'Chưa có ghi chú nào',
-  listEmptyNote: 'Bấm micro và nói một ý. Wispra lưu ngay trên điện thoại, rồi chép chữ và đặt tiêu đề.',
-  micHint: 'Bấm để nói. Bấm ■ khi xong.',
-  start: 'Bắt đầu ghi chú',
-  stop: 'Dừng và lưu',
-  cancel: 'Hủy',
-  listening: 'Đang nghe',
-  saved: 'Đã lưu trên máy.',
-  savedWaiting: 'Đã lưu trên máy. Chờ chép chữ.',
-  transcribing: 'Đã lưu trên máy. Đang chép chữ…',
-  needSignIn: 'Đã lưu trên máy. Đăng nhập Wispra Cloud ở mục Account để chép chữ và đồng bộ.',
-  verbatim: 'Nguyên văn',
-  expert: 'Chuyên gia',
-  map: 'Sơ đồ',
-  outline: 'Dàn ý',
-  article: 'Bài viết',
-  copy: 'Sao chép',
-  copied: 'Đã sao chép',
-  rewrite: 'Viết lại',
-  writing: 'Đang viết…',
-  redraw: 'Vẽ lại',
-  drawing: 'Đang vẽ…',
-  draw: 'Vẽ sơ đồ',
-  download: 'Tải xuống',
-  changeRole: 'Đổi vai',
-  roleLabel: 'Đang viết dưới vai:',
-  roleSave: 'Lưu và viết lại',
-  roleCancel: 'Hủy',
-  share: 'Chia sẻ',
-  delete: 'Xóa ghi chú',
-  missing: 'Ghi chú này không còn nữa.',
-  back: 'Quay lại',
-  noText: 'Ghi chú chưa có chữ. Chữ hiện ra khi Wispra Cloud chép xong.',
-  writeFirst: 'Dàn ý chưa được viết.',
-  writeOutline: 'Viết dàn ý',
-  writeArticle: 'Viết bài',
-  articleAbout: 'Một bài viết ngắn phát triển ý này, dưới vai chuyên gia. Hãy đọc lại trước khi dùng.',
-  mapAbout: 'Một sơ đồ tư duy của ý này: các nhánh chính và ý nhỏ.',
-  mapFailed: 'Wispra chưa vẽ được sơ đồ hợp lệ. Dưới đây là nội dung dạng chữ.',
-  version: 'Bản',
-  aiNote: 'Bản viết lại do AI của Wispra Cloud viết; nguyên văn lời bạn nói luôn được giữ nguyên.',
-  aiNeedsSignIn: 'Đăng nhập Wispra Cloud ở mục Account để dùng AI viết lại.',
-  aiNeedsAccountChoice: 'Hãy chọn cách dùng tài khoản bạn vừa đăng nhập trước, rồi thử lại.',
-  mapKeptOld: 'Chưa vẽ lại được sơ đồ hợp lệ. Giữ sơ đồ cũ.',
-  tokens: (n: number) => `Lượt này dùng khoảng ${n.toLocaleString('en-US')} token AI của tài khoản.`,
-  mapTitleFallback: 'Sơ đồ',
+  tab: 'Notes',
+  title: 'Notes',
+  listEmptyTitle: 'No notes yet',
+  listEmptyNote: 'Say an idea. Wispra keeps it on this phone, then writes it out, names it and shares it with your account.',
+  record: 'Record a note',
+  stop: 'Stop and save',
+  cancel: 'Cancel',
+  listening: 'Listening',
+  saved: 'Saved on this phone.',
+  savedWaiting: 'Saved on this phone. Waiting to be transcribed.',
+  transcribing: 'Saved on this phone. Transcribing…',
+  needSignIn: 'Saved on this phone. Sign in to Wispra Cloud in Account to transcribe and sync it.',
+  verbatim: 'Original',
+  expert: 'Expert',
+  map: 'Mind map',
+  outline: 'Outline',
+  article: 'Post',
+  copy: 'Copy',
+  copied: 'Copied',
+  rewrite: 'Rewrite',
+  writing: 'Writing…',
+  redraw: 'Redraw',
+  drawing: 'Drawing…',
+  draw: 'Draw the mind map',
+  download: 'Download',
+  changeRole: 'Change role',
+  roleLabel: 'Writing as:',
+  roleSave: 'Save and rewrite',
+  roleCancel: 'Cancel',
+  share: 'Share',
+  delete: 'Delete note',
+  remove: 'Delete',
+  missing: 'This note is no longer here.',
+  back: 'Back',
+  tryAgain: 'Try again',
+  trying: 'Trying…',
+  holdToDelete: 'Touch and hold to delete',
+  statusLabel: 'Status',
+  noText: 'The note has no words yet. They appear once Wispra Cloud has transcribed it.',
+  writeFirst: 'The outline has not been written yet.',
+  writeOutline: 'Write the outline',
+  writeArticle: 'Write the post',
+  articleAbout: 'A short post developing this idea, written as the expert. Check it before you use it.',
+  mapAbout: 'A mind map of this idea: its main branches and points.',
+  mapFailed: 'Wispra could not draw a valid mind map. Here is its content as text.',
+  version: 'Version',
+  aiNote: 'Rewrites are written by Wispra Cloud’s AI. Your original words are always kept.',
+  aiNeedsSignIn: 'Sign in to Wispra Cloud in Account to use the AI rewrite.',
+  aiNeedsAccountChoice: 'Choose how to use the account you signed in with first, then try again.',
+  mapKeptOld: 'Could not redraw a valid mind map. The earlier one is kept.',
+  downloadFailed: 'Could not download the mind map',
+  tokens: (n: number) => `This used about ${n.toLocaleString('en-US')} AI tokens of your allowance.`,
 };
 
 // ── Which notes the lists show ───────────────────────────────────────────────────────────────────
@@ -125,13 +130,9 @@ export function noteStamp(entry: Entry): string {
   return entry.note?.updatedAt ?? entry.createdAt;
 }
 
-const WEEKDAYS = ['CN', 'Th 2', 'Th 3', 'Th 4', 'Th 5', 'Th 6', 'Th 7'];
-
-// "Th 7, 25/10/2026 · 14:32": the day and the moment it was said
+// "25 Oct 2026 · 14:32": the day and the moment it was said
 export function formatNoteDate(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${WEEKDAYS[d.getDay()]}, ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} · ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${formatDate(iso)} · ${formatTime(iso)}`;
 }
 
 // A line of the list: the field and the status, as in the design

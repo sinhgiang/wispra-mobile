@@ -693,7 +693,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // The title, the field and the expert of a note, asked for once. The AI's title replaces the
-  // "Ghi chú 14:05" placeholder, never a title the person typed.
+  // "Note 14:05" placeholder, never a title the person typed.
   const ensureBasics = useCallback(
     async (id: string) => {
       const entry = current.current.find((e) => e.id === id);
@@ -702,7 +702,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       const basics = await makeBasics(entry.text, meter);
       const latest = current.current.find((e) => e.id === id);
       if (!latest) return;
-      const placeholder = latest.title === defaultNoteTitle(new Date(latest.createdAt)) || latest.title === 'Ghi chú';
+      const placeholder = latest.title === defaultNoteTitle(new Date(latest.createdAt)) || latest.title === 'Note';
       if (placeholder) commit(current.current.map((e) => (e.id === id ? { ...e, title: basics.title } : e)));
       updateNote(id, {
         domain: latest.note?.domain ?? basics.domain,

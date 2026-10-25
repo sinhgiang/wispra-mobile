@@ -100,7 +100,7 @@ export function defaultMeetingTitle(date: Date): string {
 
 // The title of a note until the AI names it (never replaces a title the person typed)
 export function defaultNoteTitle(date: Date): string {
-  return `Ghi chú ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `Note ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 // Newest first
@@ -248,7 +248,7 @@ export function parseEntries(json: string): Entry[] {
   const rows = Array.isArray((data as { entries?: unknown })?.entries) ? (data as { entries: unknown[] }).entries : [];
   return rows.filter(isEntry).map((e) => ({
     ...e,
-    title: e.title ?? (e.kind === 'meeting' ? 'Meeting' : e.kind === 'note' ? 'Ghi chú' : 'Dictation'),
+    title: e.title ?? (e.kind === 'meeting' ? 'Meeting' : e.kind === 'note' ? 'Note' : 'Dictation'),
     durationMs: e.durationMs ?? 0,
     audioUri: e.audioUri ?? null,
     text: e.text ?? null,

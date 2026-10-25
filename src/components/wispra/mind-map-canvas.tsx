@@ -49,7 +49,7 @@ function fitView(layout: MapLayout, width: number, height: number): View2 {
   return { x: (width - w * k) / 2, y: (height - h * k) / 2, k };
 }
 
-// What a screen needs to save the map as a picture (the Notes tab's "Tải xuống")
+// What a screen needs to save the map as a picture (the Notes tab's "Download")
 export interface MapExporter {
   // The whole map, with every branch open as the person left them, as a PNG in base64
   toPngBase64(): Promise<string | null>;

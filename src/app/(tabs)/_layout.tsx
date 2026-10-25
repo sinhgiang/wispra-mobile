@@ -20,7 +20,7 @@ export default function WispraTabs() {
             <TabButton>Meetings</TabButton>
           </TabTrigger>
           <TabTrigger name="notes" href="/notes" asChild>
-            <TabButton>Ghi chú</TabButton>
+            <TabButton>Notes</TabButton>
           </TabTrigger>
           <TabTrigger name="history" href="/history" asChild>
             <TabButton>History</TabButton>

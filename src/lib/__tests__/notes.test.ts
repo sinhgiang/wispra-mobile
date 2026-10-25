@@ -56,51 +56,51 @@ function note(over: Partial<Entry> = {}, data: Partial<NoteData> = {}): Entry {
 }
 
 describe('a note', () => {
-  it('starts as a recording with the placeholder title and the status Mới', () => {
+  it('starts as a recording with the placeholder title and the status New', () => {
     const e = createEntry('note', new Date(2026, 9, 25, 14, 32), 'mobile-x');
     expect(e.kind).toBe('note');
-    expect(e.title).toBe('Ghi chú 14:32');
+    expect(e.title).toBe('Note 14:32');
     expect(e.title).toBe(defaultNoteTitle(new Date(2026, 9, 25, 14, 32)));
     expect(e.status).toBe('recording');
     expect(e.note).toEqual({ status: 'new' });
   });
 
-  it('is saved and read back with everything on it, and one without a note field gets the status Mới', () => {
+  it('is saved and read back with everything on it, and one without a note field gets the status New', () => {
     const e = note({}, { domain: 'Du lịch', role: 'a travel expert', outline: '## Ý chính\n- x', articles: ['a'], mindMap: MAP });
     const back = parseEntries(serializeEntries([e]))[0];
     expect(back.note).toEqual(e.note);
     expect(back.kind).toBe('note');
     const bare = parseEntries(JSON.stringify({ entries: [{ id: 'a', kind: 'note', createdAt: '2026-10-25T07:32:00.000Z', status: 'done' }] }))[0];
     expect(bare.note).toEqual({ status: 'new' });
-    expect(bare.title).toBe('Ghi chú');
+    expect(bare.title).toBe('Note');
   });
 
   it('shows its words in the list, like a dictation', () => {
     expect(previewText(note())).toBe(SAID);
   });
 
-  it('writes the day the Vietnamese way', () => {
-    expect(formatNoteDate(new Date(2026, 9, 25, 14, 32).toISOString())).toBe('CN, 25/10/2026 · 14:32');
-    expect(formatNoteDate(new Date(2026, 9, 24, 8, 5).toISOString())).toBe('Th 7, 24/10/2026 · 08:05');
+  it('writes the day and the moment like the rest of the app', () => {
+    expect(formatNoteDate(new Date(2026, 9, 25, 14, 32).toISOString())).toBe('25 Oct 2026 · 14:32');
+    expect(formatNoteDate(new Date(2026, 9, 24, 8, 5).toISOString())).toBe('24 Oct 2026 · 08:05');
   });
 
   it('has four statuses to choose and the short names of the list', () => {
-    expect(statusLabel('new')).toBe('Mới');
-    expect(statusLabel('develop')).toBe('Phát triển thành sản phẩm');
-    expect(statusLabel('develop', true)).toBe('Phát triển');
-    expect(statusLabel('remind')).toBe('Nhắc lại sau 3 ngày');
+    expect(statusLabel('new')).toBe('New');
+    expect(statusLabel('develop')).toBe('Develop into a product');
+    expect(statusLabel('develop', true)).toBe('Develop');
+    expect(statusLabel('remind')).toBe('Remind me in 3 days');
   });
 });
 
 describe('Copy copies what is on show', () => {
-  const e = note({}, { outline: 'Dàn ý một', articles: ['Bài một', 'Bài hai'], mindMap: MAP });
+  const e = note({}, { outline: 'Outline một', articles: ['Bài một', 'Bài hai'], mindMap: MAP });
 
   it('the words as they were said', () => {
     expect(copyText(e, 'verbatim', 'outline', -1)).toBe(SAID);
   });
 
   it('the outline or the article version being viewed', () => {
-    expect(copyText(e, 'expert', 'outline', 0)).toBe('Dàn ý một');
+    expect(copyText(e, 'expert', 'outline', 0)).toBe('Outline một');
     expect(copyText(e, 'expert', 'article', 0)).toBe('Bài một');
     expect(copyText(e, 'expert', 'article', 1)).toBe('Bài hai');
     expect(copyText(e, 'expert', 'article', 9)).toBe('Bài hai');
@@ -307,9 +307,9 @@ describe('accounts and deleting follow the history’s rules', () => {
   });
 
   it('the warning before deleting says where a note goes', () => {
-    expect(deleteOneWarning(note({ syncedAt: 'x' }), true).title).toBe('Xóa ghi chú này ở mọi nơi?');
-    expect(deleteOneWarning(note(), true).confirm).toBe('Xóa khỏi điện thoại này');
-    expect(deleteOneWarning(note(), false).message).toContain('chưa đăng nhập');
+    expect(deleteOneWarning(note({ syncedAt: 'x' }), true).title).toBe('Delete this note everywhere?');
+    expect(deleteOneWarning(note(), true).confirm).toBe('Delete from this phone');
+    expect(deleteOneWarning(note(), false).message).toContain('You are not signed in');
     expect(deleteAllWarning([note(), note({ id: 'mobile-2' })], true).message).toContain('0 dictations, 0 meetings and 2 notes');
   });
 
