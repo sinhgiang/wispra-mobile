@@ -162,7 +162,24 @@ const DICTATIONS: Entry[] = [
   { ...createEntry('dictation', new Date(2026, 9, 25, 8, 40), 'mobile-d2'), status: 'done', title: 'Wispra (phone)', text: 'Book the table for Saturday at seven.', durationMs: 4_000 },
 ];
 
-function page(name: string, css: string, body: string): void {
+// react-native-web draws a Pressable as a <button>, and a Pressable inside a Pressable (the buttons of a
+// "not transcribed yet" card) is a <button> inside a <button>: fine on the phone, but a browser reading the
+// saved page repairs it and the card falls apart. Where that happens, the buttons become plain boxes.
+function flattenNestedButtons(html: string): string {
+  let depth = 0;
+  let nested = false;
+  for (const m of html.matchAll(/<button(?![a-z])|<[/]button>/g)) {
+    if (m[0] === '</button>') depth -= 1;
+    else {
+      depth += 1;
+      if (depth > 1) nested = true;
+    }
+  }
+  return nested ? html.replace(/<button(?![a-z])/g, '<div').replace(/<[/]button>/g, '</div>').replace(/ type="button"/g, '') : html;
+}
+
+function page(name: string, css: string, rawBody: string): void {
+  const body = flattenNestedButtons(rawBody);
   fs.mkdirSync(OUT, { recursive: true });
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${name}</title>
 <style>html,body{margin:0;height:100%;background:#0f1117}#root{display:flex;flex-direction:column;width:100vw;height:100vh;overflow:hidden;background:#0f1117;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}</style>
