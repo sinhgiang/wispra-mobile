@@ -35,7 +35,7 @@ describe('spelling the vocabulary back (the computer’s spellVocabulary)', () =
   });
 
   it('leaves web addresses, e-mails and file names alone', () => {
-    expect(spellVocabulary('vào github.com/x và gửi a@github.org, mở capcut.exe', OWNER)).toBe('vào github.com/x và gửi a@github.org, mở capcut.exe');
+    expect(spellVocabulary('vào github.com/x và gửi ten@github.example.com, mở capcut.exe', OWNER)).toBe('vào github.com/x và gửi ten@github.example.com, mở capcut.exe');
   });
 
   it('never adds a word, and never touches a text with no term', () => {

@@ -24,7 +24,7 @@ describe('sign-in callback', () => {
 });
 
 describe('session', () => {
-  const s = { accessToken: 'a', refreshToken: 'r', expiresAt: 1_000_000, userId: 'u', email: 'e@x.com' };
+  const s = { accessToken: 'a', refreshToken: 'r', expiresAt: 1_000_000, userId: 'u', email: 'ten@example.com' };
 
   it('refreshes five minutes before expiry', () => {
     expect(needsRefresh(s, 1_000_000 - 6 * 60_000)).toBe(false);
