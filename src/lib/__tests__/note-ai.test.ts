@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { AiError, billedTokens, newMeter } from '../ai';
-import { MAP_REPAIRS, makeBasics, makeExpertArticle, makeExpertOutline, makeNoteMap, NOTE_CHARS, outlineMaxTokens, outlinePrompt } from '../note-ai';
+import { MAP_REPAIRS, makeBasics, makeExpertArticle, makeExpertOutline, makeNoteMap, NOTE_CHARS, OUTLINE_HEADINGS_VI, outlineMaxTokens, outlinePrompt } from '../note-ai';
 
 const mockChatJson = jest.fn<(system: string, user: string, maxTokens: number, temperature?: number) => Promise<unknown>>();
 jest.mock('../ai', () => {
@@ -82,6 +82,31 @@ describe('the expert outline is as long and detailed as the computer’s (T-1004
     // The text the computer (spetotext notePrompts.ts, T-1003) writes for the same role and note
     const computer = fs.readFileSync(path.join(__dirname, 'fixtures', 'outline-prompt-computer.txt'), 'utf8').replaceAll('\r\n', '\n');
     expect(outlinePrompt(ENGLISH, 'a travel expert')).toBe(computer);
+    // The same for a Vietnamese note (commit 6b40307 of the computer: the headings are given in Vietnamese)
+    const computerVi = fs.readFileSync(path.join(__dirname, 'fixtures', 'outline-prompt-computer-vi.txt'), 'utf8').replaceAll('\r\n', '\n');
+    expect(outlinePrompt(VIETNAMESE, 'chuyên gia du lịch')).toBe(computerVi);
+  });
+
+  it('gives a Vietnamese note its nine headings in Vietnamese, so they do not come back in English', () => {
+    const prompt = outlinePrompt(VIETNAMESE, 'chuyên gia du lịch');
+    expect(OUTLINE_HEADINGS_VI).toHaveLength(9);
+    const at = OUTLINE_HEADINGS_VI.map((h) => prompt.indexOf(`"## ${h}"`));
+    expect(at.every((x) => x >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(prompt).toContain('Never write a heading in English');
+    expect(prompt).toContain('suy luận, cần kiểm chứng');
+    // The English names only describe the sections
+    expect(prompt).toContain('their names here are English only to describe them');
+    expect(prompt).not.toContain('TRANSLATE every section name');
+  });
+
+  it('tells a note in another language to translate the section and group names', () => {
+    const french = 'Je veux construire une plateforme où des guides locaux proposent eux-mêmes leurs circuits.';
+    for (const text of [ENGLISH, french]) {
+      const prompt = outlinePrompt(text, 'a travel expert');
+      expect(prompt).toContain('TRANSLATE every section name, and every group name under "Features in detail", into the language of the note');
+      expect(prompt).not.toContain('"## Tóm tắt"');
+    }
   });
 
   it('has the nine sections in order, keeps every idea, and names feature groups with ### lines', () => {

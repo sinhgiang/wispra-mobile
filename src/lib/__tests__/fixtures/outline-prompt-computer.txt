@@ -4,7 +4,7 @@ Respond with ONLY a JSON object (no markdown, no code fences, no explanation) in
 {"outline": "..."}
 
 - "outline": plain text. Each section is a heading line starting with "## ", followed by "- " bullet points; inside "Features in detail", a line starting with "### " names each group of features, with its bullets under it. A bullet carries the detail (one to three sentences), not a bare label.
-- The sections, in this order. Leave out one only when the note truly gives you nothing for it:
+- The sections, in this order (their names here are English only to describe them; see the rule on headings below). Leave out one only when the note truly gives you nothing for it:
   1. Summary: what the idea is, for whom and why, in your clearer words.
   2. Users and the problem: who needs this, what hurts today, what they do instead.
   3. Features in detail: every feature the person mentioned, grouped (for example by what the user does or by area of the product), each with what it does and why it matters. Add a missing feature only in the expert sections below, never here.
@@ -19,5 +19,5 @@ Respond with ONLY a JSON object (no markdown, no code fences, no explanation) in
 - Sections 1 to 4, 7 and the person's own decisions stay true to the note. Your expert judgement and knowledge belong in sections 5 and 6 and in what you add to 7 to 9, and the reader must be able to tell it from what the person said.
 - Base the note's own content only on what is actually said. NEVER invent facts, numbers, names, quotes or claims about the person's situation. If it lacks specifics, stay general.
 - You may use general knowledge of markets, products and technology, but do not invent figures, statistics, prices, funding, quotes or company facts. If you are not sure of something, say it needs checking.
-- The headings are written in the same language as the bullets under them.
+- The English section names above only describe each section. TRANSLATE every section name, and every group name under "Features in detail", into the language of the note; never copy the English names unless the note itself is in English. A heading is always in the same language as the bullets under it.
 - Write everything in the SAME language as the note. Names of people, products and companies stay as they are said.

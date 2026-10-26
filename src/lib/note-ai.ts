@@ -63,9 +63,35 @@ export function outlineMaxTokens(text: string): number {
 }
 
 /**
- * The Expert outline (T-1004), word for word the computer's (spetotext notePrompts.ts, T-1003). The person
- * has ten years of turning ideas into products; the outline follows the idea's length, keeps every idea of
- * the person and puts market knowledge in its own sections, marked as inference.
+ * The nine headings of the Expert outline in Vietnamese, in the order of the prompt, as on the computer.
+ * The prompt lists the sections by their English names and a model copies what it is shown: with the real
+ * model the headings came out in English above Vietnamese bullets. A Vietnamese note is therefore given its
+ * headings word for word; any other language is told to translate them.
+ */
+export const OUTLINE_HEADINGS_VI = [
+  'Tóm tắt',
+  'Người dùng và vấn đề',
+  'Tính năng chi tiết',
+  'Cách hoạt động từng bước',
+  'Đối thủ và điểm khác biệt',
+  'Mô hình kinh doanh',
+  'MVP',
+  'Rủi ro và câu hỏi mở',
+  'Bước tiếp theo',
+];
+
+function outlineHeadings(text: string): string {
+  if (meetingLanguage(text) === 'Vietnamese') {
+    return `- The headings are written in Vietnamese, exactly as: ${OUTLINE_HEADINGS_VI.map((h) => `"## ${h}"`).join(', ')} (in that order, leaving out only a section you have nothing for). The names of the feature groups under the third one are Vietnamese too. Never write a heading in English; where a statement is marked as an inference to verify, write the mark in Vietnamese ("suy luận, cần kiểm chứng").`;
+  }
+  return '- The English section names above only describe each section. TRANSLATE every section name, and every group name under "Features in detail", into the language of the note; never copy the English names unless the note itself is in English. A heading is always in the same language as the bullets under it.';
+}
+
+/**
+ * The Expert outline (T-1004), word for word the computer's (spetotext notePrompts.ts, T-1003 with the
+ * headings fix of commit 6b40307). The person has ten years of turning ideas into products; the outline
+ * follows the idea's length, keeps every idea of the person and puts market knowledge in its own sections,
+ * marked as inference.
  */
 export function outlinePrompt(text: string, role: string): string {
   return `You are ${role}, with ten years of experience turning raw ideas into real products: you know the market and the competitors, how such a product is built, and how it earns money. You turn a voice note into the working document you would write for the person from it. ${NOTE_FORMAT}
@@ -74,7 +100,7 @@ ${JSON_ONLY}
 {"outline": "..."}
 
 - "outline": plain text. Each section is a heading line starting with "## ", followed by "- " bullet points; inside "Features in detail", a line starting with "### " names each group of features, with its bullets under it. A bullet carries the detail (one to three sentences), not a bare label.
-- The sections, in this order. Leave out one only when the note truly gives you nothing for it:
+- The sections, in this order (their names here are English only to describe them; see the rule on headings below). Leave out one only when the note truly gives you nothing for it:
   1. Summary: what the idea is, for whom and why, in your clearer words.
   2. Users and the problem: who needs this, what hurts today, what they do instead.
   3. Features in detail: every feature the person mentioned, grouped (for example by what the user does or by area of the product), each with what it does and why it matters. Add a missing feature only in the expert sections below, never here.
@@ -89,7 +115,7 @@ ${JSON_ONLY}
 - Sections 1 to 4, 7 and the person's own decisions stay true to the note. Your expert judgement and knowledge belong in sections 5 and 6 and in what you add to 7 to 9, and the reader must be able to tell it from what the person said.
 ${ANTI_FABRICATION}
 - You may use general knowledge of markets, products and technology, but do not invent figures, statistics, prices, funding, quotes or company facts. If you are not sure of something, say it needs checking.
-- The headings are written in the same language as the bullets under them.
+${outlineHeadings(text)}
 ${sameLanguage(text)}`
 }
 
