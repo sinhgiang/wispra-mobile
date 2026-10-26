@@ -269,6 +269,23 @@ describe('pictures of the Notes screens, with Meetings and History beside them',
     mockPhase = 'idle';
   });
 
+  it('T-1000: the mind map zoomed in, then a branch opened; the zoom stays (after) or goes back to the first size (before)', async () => {
+    const name = process.env.WISPRA_SHOTS_PREFIX ?? 'after';
+    mockEntries = [...LIST];
+    mockId = 'mobile-n1';
+    await shot(`${name}-map-1-zoomed`, <NoteScreen />, async (c) => {
+      await press(c, 'Mind map');
+      await press(c, '+');
+      await press(c, '+');
+    });
+    await shot(`${name}-map-2-branch-opened`, <NoteScreen />, async (c) => {
+      await press(c, 'Mind map');
+      await press(c, '+');
+      await press(c, '+');
+      await press(c, 'Open Model (2)');
+    });
+  });
+
   it('a meeting beside a note: the words as said, the expert outline, the status menu, the mind map', async () => {
     mockEntries = [...MEETINGS, ...LIST];
     mockId = 'mobile-m1';
