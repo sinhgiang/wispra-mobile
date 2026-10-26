@@ -1,4 +1,4 @@
-import { chatJson } from './ai';
+import { chatJson, type AiMeter } from './ai';
 import {
   meetingLanguage,
   parseMindMap,
@@ -89,7 +89,7 @@ ${ACTION_RULES}
 ${ANTI_FABRICATION_RULE}
 ${SAME_LANGUAGE}`;
 
-const MIND_MAP_PROMPT = `You turn a meeting/voice-memo transcript into a mind map that shows the whole recording at a glance. ${TRANSCRIPT_FORMAT}
+export const MIND_MAP_PROMPT = `You turn a meeting/voice-memo transcript into a mind map that shows the whole recording at a glance. ${TRANSCRIPT_FORMAT}
 
 ${JSON_ONLY}
 {"title": "...", "note": "...", "topics": [{"label": "...", "note": "...", "points": [{"label": "...", "note": "...", "points": [{"label": "..."}]}]}], "decisions": [{"label": "...", "note": "..."}], "actions": [{"label": "...", "note": "...", "owner": "...", "due": "..."}], "questions": [{"label": "...", "note": "..."}], "branchLabels": {"decisions": "...", "actions": "...", "questions": "..."}}
@@ -113,27 +113,28 @@ ${JSON_ONLY}
 
 // Characters of transcript per call. gpt-oss-120b has a large context; this leaves room for its
 // hidden reasoning and the answer.
-const SINGLE_PASS_CHARS = 60_000;
+export const SINGLE_PASS_CHARS = 60_000;
 const PART_CHARS = 40_000;
 const ASK_CHARS = 80_000;
 
-export async function makeOutline(lines: TranscriptLine[]): Promise<Outline> {
+// meter: adds up the tokens Wispra Cloud bills for the calls (so the cost of a summary can be shown)
+export async function makeOutline(lines: TranscriptLine[], meter?: AiMeter): Promise<Outline> {
   if (lines.length === 0) return { topics: [], actions: [] };
   const text = transcriptText(lines);
   const language = languageOf(lines);
   if (text.length <= SINGLE_PASS_CHARS) {
-    const outline = parseOutline(await chatJson(withLanguage(OUTLINE_PROMPT, language), text, 6000), lines);
+    const outline = parseOutline(await chatJson(withLanguage(OUTLINE_PROMPT, language), text, 6000, 0.2, meter), lines);
     if (!outline) throw new Error('The meeting notes came back incomplete. Try again.');
     return outline;
   }
   // A long meeting: notes part by part, then one small call for the title and the opening
   const parts: Outline[] = [];
   for (const part of splitLines(lines, PART_CHARS)) {
-    const outline = parseOutline(await chatJson(withLanguage(PART_PROMPT, language), transcriptText(part), 4000), part);
+    const outline = parseOutline(await chatJson(withLanguage(PART_PROMPT, language), transcriptText(part), 4000, 0.2, meter), part);
     if (outline) parts.push(outline);
   }
   const body = parts.map((p) => p.summary ?? '').filter(Boolean).join('\n\n');
-  const joined = (await chatJson(withLanguage(JOIN_PROMPT, language), body.slice(0, SINGLE_PASS_CHARS), 1500)) as { title?: unknown; intro?: unknown };
+  const joined = (await chatJson(withLanguage(JOIN_PROMPT, language), body.slice(0, SINGLE_PASS_CHARS), 1500, 0.2, meter)) as { title?: unknown; intro?: unknown };
   const intro = typeof joined.intro === 'string' ? joined.intro.trim() : '';
   return {
     title: typeof joined.title === 'string' ? joined.title.trim() : undefined,

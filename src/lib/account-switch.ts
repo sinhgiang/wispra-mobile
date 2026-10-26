@@ -53,8 +53,10 @@ export function ownerAfterSignIn(owner: Owner, session: SignedIn | null): Owner 
 export interface PhoneData {
   dictations: number;
   meetings: number;
-  // Only on this phone: phone dictations never shared, and every meeting (meetings never go to
-  // Wispra Cloud). Using only the new account deletes these for good.
+  // Notes (T-0979); they go to Wispra Cloud like dictations
+  notes: number;
+  // Only on this phone: phone dictations and notes never shared, and every meeting (meetings never
+  // go to Wispra Cloud). Using only the new account deletes these for good.
   onlyHere: number;
 }
 
@@ -66,8 +68,9 @@ function settled(entries: Entry[]): Entry[] {
 export function phoneData(entries: Entry[]): PhoneData {
   const list = settled(entries);
   const meetings = list.filter((e) => e.kind === 'meeting').length;
+  const notes = list.filter((e) => e.kind === 'note').length;
   const onlyHere = list.filter((e) => e.kind === 'meeting' || (e.source !== 'computer' && !e.syncedAt)).length;
-  return { dictations: list.length - meetings, meetings, onlyHere };
+  return { dictations: list.length - meetings - notes, meetings, notes, onlyHere };
 }
 
 /**
@@ -78,6 +81,8 @@ export function phoneData(entries: Entry[]): PhoneData {
  */
 export function mergeIntoNewAccount(entries: Entry[], makeId: () => string = newId): Entry[] {
   return entries.map((e) => {
+    // A note was shared with the previous account; it is shared again with the new one
+    if (e.kind === 'note') return { ...e, syncedAt: undefined };
     if (e.kind !== 'dictation') return e;
     if (e.source === 'computer') return { ...e, id: makeId(), source: undefined, syncedAt: undefined };
     return { ...e, syncedAt: undefined };
@@ -109,7 +114,10 @@ export function choiceText(previous: DataOwner | 'unknown', next: SignedIn, data
   const prev = previous === 'unknown' ? 'an earlier account' : previous.email || 'the previous account';
   const from =
     previous === 'unknown' ? 'from an earlier account (this phone did not keep which one)' : `from ${previous.email || 'the previous account'}`;
-  const what = `${plural(data.dictations, 'dictation')} and ${plural(data.meetings, 'meeting')}`;
+  const what =
+    data.notes > 0
+      ? `${plural(data.dictations, 'dictation')}, ${plural(data.meetings, 'meeting')} and ${plural(data.notes, 'note')}`
+      : `${plural(data.dictations, 'dictation')} and ${plural(data.meetings, 'meeting')}`;
   const lost =
     data.onlyHere > 0
       ? ` ${data.onlyHere === 1 ? '1 of them is' : `${data.onlyHere} of them are`} only on this phone (meetings, and dictations not shared yet) and will be deleted for good.`

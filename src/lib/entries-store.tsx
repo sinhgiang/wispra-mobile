@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, AppState } from 'react-native';
 
-import { AiError } from './ai';
+import { AiError, newMeter, type AiMeter } from './ai';
 import {
   applyAccountChoice,
   choiceView,
@@ -19,7 +19,9 @@ import { commitWithRollback } from './cloud-gate';
 import { nextJob, pieceUpdate, runQueue, TRANSCRIBE_CONCURRENCY, type Job, type JobOutcome } from './transcribe-queue';
 import { File } from 'expo-file-system';
 
-import { defaultMeetingTitle, fixText, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
+import { defaultMeetingTitle, defaultNoteTitle, fixText, meetingLines, newId, recoverInterrupted, type Entry } from './entries';
+import { makeBasics, makeExpertArticle, makeExpertOutline, makeNoteMap } from './note-ai';
+import { DEFAULT_ROLE, MAX_ARTICLES, NOTE_TEXT, planNoteSync, toNoteHistoryEntry, type NoteData, type NoteWork } from './notes';
 import { learnFromFix, type WordPair } from './lexicon';
 import { EMPTY_STATE, recordDictation, recordFix, refreshAutoTerms } from './learned/learned';
 import { resetWordsSyncStatus } from './words-sync-store';
@@ -106,6 +108,12 @@ interface EntriesApi {
   // A website article or three social posts, written on demand (T-0164)
   makeContentFor(id: string, platform: ContentPlatform): Promise<void>;
   ask(id: string, question: string): Promise<void>;
+  // Notes (T-0979): a change to the note (stamped, so it is shared again), its status, and the AI work
+  // asked for by the person: the expert outline or article, or the mind map. `role` is the expert the
+  // person chose instead of the AI's.
+  updateNote(id: string, change: Partial<NoteData>): void;
+  setNoteStatus(id: string, status: NoteData['status']): void;
+  writeNote(id: string, what: 'outline' | 'article' | 'map', role?: string): Promise<void>;
   // Signed in with another account than the one whose data is on this phone: what the user must
   // choose before anything is synced (null when there is nothing to choose)
   accountChoice: AccountChoiceView | null;
@@ -169,6 +177,15 @@ function errorText(err: unknown): string {
 function readyToFinish(e: Entry): boolean {
   return !!e.segments && e.status === 'pending' && !e.segments.some((s) => s.status === 'pending' || s.status === 'recording');
 }
+
+// A note whose words are written and that has no outline yet (the title and field come with it); one
+// that failed for a reason of its own waits for the person to try again
+function wantsNoteAi(e: Entry): boolean {
+  return e.kind === 'note' && e.status === 'done' && !!e.text?.trim() && !e.note?.outline && !e.note?.error;
+}
+
+// A note carries its outline, articles and map, so far fewer go in one request than dictations
+const NOTE_BATCH = 10;
 
 // A finished meeting that has no notes yet
 function wantsNotes(e: Entry): boolean {
@@ -568,6 +585,23 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
         const at = new Date().toISOString();
         commit(current.current.map((e) => (ids.has(e.id) ? { ...e, syncedAt: at } : e)));
       }
+
+      // 4. Notes both ways (T-0979): rows of the same history, told apart by their `app`
+      const notePlan = planNoteSync(current.current, page.entries, skip, page.complete, new Date().toISOString());
+      if (notePlan.upserts.length > 0) {
+        const incoming = new Map(notePlan.upserts.map((e) => [e.id, e]));
+        const kept = current.current.map((e) => incoming.get(e.id) ?? e);
+        const known = new Set(kept.map((e) => e.id));
+        commit([...kept, ...notePlan.upserts.filter((e) => !known.has(e.id))]);
+      }
+      for (const batch of batches(notePlan.push, NOTE_BATCH)) {
+        // Marked as shared at the moment it was read, so a change made while the request is on its
+        // way is shared again next time instead of being taken for shared
+        const at = new Date().toISOString();
+        await mergeHistory(batch.map(toNoteHistoryEntry), user);
+        const ids = new Set(batch.map((e) => e.id));
+        commit(current.current.map((e) => (ids.has(e.id) ? { ...e, syncedAt: at } : e)));
+      }
       setSyncState((prev) => ({ ...prev, at: new Date().toISOString(), note: null }));
     } catch (err) {
       // The account changed during the sync: the new account's own sync follows, nothing to say
@@ -614,13 +648,14 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       mark(id, true);
       updateNotes(id, { error: undefined });
       try {
-        const outline = await makeOutline(lines);
+        const meter = newMeter();
+        const outline = await makeOutline(lines, meter);
         const latest = current.current.find((e) => e.id === id);
         if (!latest) return;
         // The AI title replaces the "Meeting 14:05" placeholder, never a title the user typed
         const placeholder = latest.title === defaultMeetingTitle(new Date(latest.createdAt)) || latest.title === 'Meeting';
         if (outline.title && placeholder) update(id, { title: outline.title });
-        updateNotes(id, { summary: outline.summary ?? '', topics: outline.topics, actions: outline.actions, live: false });
+        updateNotes(id, { summary: outline.summary ?? '', topics: outline.topics, actions: outline.actions, live: false, summaryTokens: meter.tokens || undefined });
       } catch (err) {
         if (err instanceof AiError && err.transient) throw err;
         updateNotes(id, { error: errorText(err) });
@@ -629,6 +664,142 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       }
     },
     [mark, update, updateNotes],
+  );
+
+  // ── Notes (T-0979) ────────────────────────────────────────────────────────────────────────────
+  // Every change is stamped, so a note changed after it was shared is shared again (notes.ts)
+  const updateNote = useCallback(
+    (id: string, change: Partial<NoteData>) =>
+      commit(
+        current.current.map((e) =>
+          e.id === id && e.kind === 'note'
+            ? { ...e, note: { status: 'new' as const, ...e.note, ...change, updatedAt: new Date().toISOString() } }
+            : e,
+        ),
+      ),
+    [commit],
+  );
+
+  // The message of a failed AI try is not part of the note: it is shown, not shared
+  const setNoteError = useCallback(
+    (id: string, error: string | undefined) =>
+      commit(current.current.map((e) => (e.id === id && e.kind === 'note' && e.note?.error !== error ? { ...e, note: { status: 'new' as const, ...e.note, error } } : e))),
+    [commit],
+  );
+
+  const usageOf = useCallback((id: string, work: NoteWork, meter: AiMeter): Pick<NoteData, 'usage'> => {
+    const latest = current.current.find((e) => e.id === id);
+    return { usage: { ...(latest?.note?.usage ?? {}), [work]: { tokens: meter.tokens, at: new Date().toISOString() } } };
+  }, []);
+
+  // The title, the field and the expert of a note, asked for once. The AI's title replaces the
+  // "Note 14:05" placeholder, never a title the person typed.
+  const ensureBasics = useCallback(
+    async (id: string) => {
+      const entry = current.current.find((e) => e.id === id);
+      if (!entry?.text?.trim() || (entry.note?.domain && entry.note.role)) return;
+      const meter = newMeter();
+      const basics = await makeBasics(entry.text, meter);
+      const latest = current.current.find((e) => e.id === id);
+      if (!latest) return;
+      const placeholder = latest.title === defaultNoteTitle(new Date(latest.createdAt)) || latest.title === 'Note';
+      if (placeholder) commit(current.current.map((e) => (e.id === id ? { ...e, title: basics.title } : e)));
+      updateNote(id, {
+        domain: latest.note?.domain ?? basics.domain,
+        role: latest.note?.roleEdited && latest.note.role ? latest.note.role : basics.role,
+        ...usageOf(id, 'basics', meter),
+      });
+    },
+    [commit, updateNote, usageOf],
+  );
+
+  // A note whose words have arrived: its title and field, then the expert outline. A passing failure
+  // (no connection, busy) is thrown so the queue tries again; anything else is kept on the note.
+  const processNote = useCallback(
+    async (id: string) => {
+      if (!current.current.find((e) => e.id === id)?.text?.trim()) return;
+      mark(id, true);
+      setNoteError(id, undefined);
+      try {
+        await ensureBasics(id);
+        const latest = current.current.find((e) => e.id === id);
+        if (!latest?.text) return;
+        const meter = newMeter();
+        const outline = await makeExpertOutline(latest.text, latest.note?.role || DEFAULT_ROLE, meter);
+        updateNote(id, { outline, ...usageOf(id, 'outline', meter) });
+      } catch (err) {
+        if (err instanceof AiError && err.transient) throw err;
+        setNoteError(id, errorText(err));
+      } finally {
+        mark(id, false);
+      }
+    },
+    [ensureBasics, mark, setNoteError, updateNote, usageOf],
+  );
+
+  // AI work the person asked for shows its error in place
+  const userNote = useCallback(
+    async (id: string, work: () => Promise<void>) => {
+      if (!transcriptionAvailable()) {
+        setNoteError(id, NOTE_TEXT.aiNeedsSignIn);
+        return;
+      }
+      if (!cloudAllowed()) {
+        setNoteError(id, NOTE_TEXT.aiNeedsAccountChoice);
+        return;
+      }
+      mark(id, true);
+      setNoteError(id, undefined);
+      try {
+        await work();
+      } catch (err) {
+        setNoteError(id, errorText(err));
+      } finally {
+        mark(id, false);
+      }
+      // The new version is shared with the account's other devices
+      void syncRef.current?.();
+    },
+    [cloudAllowed, mark, setNoteError],
+  );
+
+  const writeNote = useCallback(
+    (id: string, what: 'outline' | 'article' | 'map', role?: string) =>
+      userNote(id, async () => {
+        if (!current.current.find((e) => e.id === id)?.text?.trim()) return;
+        if (role?.trim()) updateNote(id, { role: role.trim().slice(0, 160), roleEdited: true });
+        await ensureBasics(id);
+        const entry = current.current.find((e) => e.id === id);
+        if (!entry?.text) return;
+        const expert = entry.note?.role || DEFAULT_ROLE;
+        const meter = newMeter();
+        if (what === 'outline') {
+          const outline = await makeExpertOutline(entry.text, expert, meter);
+          updateNote(id, { outline, ...usageOf(id, 'outline', meter) });
+        } else if (what === 'article') {
+          const article = await makeExpertArticle(entry.text, expert, meter);
+          // Read again after the wait: the earlier versions are kept, the oldest goes after three
+          const articles = [...(current.current.find((e) => e.id === id)?.note?.articles ?? []), article].slice(-MAX_ARTICLES);
+          updateNote(id, { articles, ...usageOf(id, 'article', meter) });
+        } else {
+          const drawn = await makeNoteMap(entry.text, expert, meter);
+          const had = current.current.find((e) => e.id === id)?.note?.mindMap;
+          if (drawn.map) updateNote(id, { mindMap: drawn.map, mapText: undefined, ...usageOf(id, 'map', meter) });
+          // A new try that stayed invalid does not throw away a good map the note already has
+          else if (had) throw new Error(NOTE_TEXT.mapKeptOld);
+          else updateNote(id, { mapText: drawn.text, ...usageOf(id, 'map', meter) });
+        }
+      }),
+    [ensureBasics, updateNote, usageOf, userNote],
+  );
+
+  const setNoteStatus = useCallback(
+    (id: string, status: NoteData['status']) => {
+      // Only the choice is kept: nothing is scheduled and no notification is sent (step 1)
+      updateNote(id, { status, statusAt: new Date().toISOString() });
+      void syncRef.current?.();
+    },
+    [updateNote],
   );
 
   // One job of the queue (transcribe-queue.ts picks the jobs and runs the loop): a piece of a
@@ -683,9 +854,16 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
             return 'later';
           }
           return 'done';
+        case 'note-ai':
+          try {
+            await processNote(e.id);
+          } catch {
+            return 'later';
+          }
+          return 'done';
       }
     },
-    [finishMeeting, makeNotes, mark, splitLargeRecording, splitLongPiece, update, updateSegment],
+    [finishMeeting, makeNotes, mark, processNote, splitLargeRecording, splitLongPiece, update, updateSegment],
   );
 
   // Works through everything waiting, one job at a time, when signed in to Wispra Cloud. A new
@@ -703,6 +881,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
           nextJob(current.current, skip, {
             readyToFinish,
             wantsNotes,
+            wantsNoteAi,
             needsSplit: (piece) => needsSplit(piece) && canSplitAudio,
           }),
         run: runJob,
@@ -924,6 +1103,9 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       addSegment,
       updateSegment,
       updateNotes,
+      updateNote,
+      setNoteStatus,
+      writeNote,
       splitLongPiece,
       remove,
       removeAll,
@@ -940,7 +1122,7 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
       chooseAccount,
       cloudAllowed,
     }),
-    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, splitLongPiece, remove, removeAll, fixEntry, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makeContentFor, ask, accountChoice, chooseAccount, cloudAllowed],
+    [entries, loaded, get, add, update, addSegment, updateSegment, updateNotes, updateNote, setNoteStatus, writeNote, splitLongPiece, remove, removeAll, fixEntry, retry, busy, transcribeWaiting, syncState, makeNotesByUser, makeMindMapFor, makeContentFor, ask, accountChoice, chooseAccount, cloudAllowed],
   );
   return <EntriesContext.Provider value={api}>{children}</EntriesContext.Provider>;
 }

@@ -93,9 +93,10 @@ export function deletableEntries(entries: Entry[]): Entry[] {
   return entries.filter((e) => e.status !== 'recording');
 }
 
-// Whether an entry is in Wispra Cloud: a computer dictation, or a phone dictation already shared.
-// Meetings stay on the phone, and a dictation never shared has nothing to delete there.
+// Whether an entry is in Wispra Cloud: a computer dictation, or a phone dictation or note already
+// shared. Meetings stay on the phone, and an entry never shared has nothing to delete there.
 export function isInCloud(entry: Entry): boolean {
+  if (entry.kind === 'note') return !!entry.syncedAt;
   return entry.kind === 'dictation' && (entry.source === 'computer' || !!entry.syncedAt);
 }
 
@@ -122,7 +123,7 @@ export function applyRemoteDeletes(local: Entry[], deletedIds: readonly string[]
   const gone = new Set(deletedIds);
   const keep: Entry[] = [];
   const removed: Entry[] = [];
-  for (const e of local) (e.kind === 'dictation' && gone.has(cloudIdOf(e)) ? removed : keep).push(e);
+  for (const e of local) ((e.kind === 'dictation' || e.kind === 'note') && gone.has(cloudIdOf(e)) ? removed : keep).push(e);
   return { keep, removed };
 }
 
@@ -171,6 +172,24 @@ export interface DeleteWarning {
 
 // The warning shown before one entry is deleted
 export function deleteOneWarning(entry: Entry, signedIn: boolean): DeleteWarning {
+  if (entry.kind === 'note') {
+    const shared = !!entry.syncedAt;
+    if (signedIn && shared) {
+      return {
+        title: 'Delete this note everywhere?',
+        message:
+          'It will be deleted from this phone, from Wispra Cloud and from every device signed in to your Wispra account, your computer included. This cannot be undone.',
+        confirm: 'Delete everywhere',
+      };
+    }
+    return {
+      title: 'Delete this note from this phone?',
+      message: signedIn
+        ? 'It has not been shared with your other devices yet, so it is deleted from this phone only. This cannot be undone.'
+        : 'You are not signed in, so it is deleted from this phone only. A copy already shared with your computer stays there. This cannot be undone.',
+      confirm: 'Delete from this phone',
+    };
+  }
   if (entry.kind === 'meeting') {
     return {
       title: 'Delete this meeting?',
@@ -208,8 +227,12 @@ export function deleteOneWarning(entry: Entry, signedIn: boolean): DeleteWarning
 export function deleteAllWarning(entries: Entry[], signedIn: boolean): DeleteWarning {
   const total = entries.length;
   const meetings = entries.filter((e) => e.kind === 'meeting').length;
-  const dictations = total - meetings;
-  const parts = `${plural(dictations, 'dictation')} and ${plural(meetings, 'meeting')}`;
+  const notes = entries.filter((e) => e.kind === 'note').length;
+  const dictations = total - meetings - notes;
+  const parts =
+    notes > 0
+      ? `${plural(dictations, 'dictation')}, ${plural(meetings, 'meeting')} and ${plural(notes, 'note')}`
+      : `${plural(dictations, 'dictation')} and ${plural(meetings, 'meeting')}`;
   if (signedIn) {
     return {
       title: `Delete all ${plural(total, 'recording')} everywhere?`,

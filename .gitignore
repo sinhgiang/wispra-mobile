@@ -45,3 +45,6 @@ example
 # Gradle output of local Expo modules
 modules/*/android/build/
 modules/*/android/.cxx/
+
+# pictures of screens (scripts/screens-web)
+.screens-web/

@@ -17,6 +17,7 @@ const FILTERS: { value: KindFilter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'dictation', label: 'Dictations' },
   { value: 'meeting', label: 'Meetings' },
+  { value: 'note', label: 'Notes' },
 ];
 
 export default function HistoryScreen() {
@@ -50,6 +51,7 @@ export default function HistoryScreen() {
 
   const open = (entry: Entry) => {
     if (entry.kind === 'meeting') router.push({ pathname: '/meeting/[id]', params: { id: entry.id } });
+    else if (entry.kind === 'note') router.push({ pathname: '/note/[id]', params: { id: entry.id } });
     // A dictation opens with all of its words, Copy and Edit (T-0179)
     else if (!needsTranscription(entry)) router.push({ pathname: '/entry/[id]', params: { id: entry.id } });
   };
@@ -63,7 +65,7 @@ export default function HistoryScreen() {
         </View>
         <TextInput
           accessibilityLabel="Search"
-          placeholder="Search dictations and meetings"
+          placeholder="Search dictations, meetings and notes"
           placeholderTextColor={W.faint}
           value={query}
           onChangeText={setQuery}
@@ -87,7 +89,7 @@ export default function HistoryScreen() {
         ListEmptyComponent={
           <Text style={styles.empty}>
             {entries.length === 0
-              ? 'Your dictations and meetings will show up here.'
+              ? 'Your dictations, meetings and notes will show up here.'
               : 'Nothing matches your search.'}
           </Text>
         }
