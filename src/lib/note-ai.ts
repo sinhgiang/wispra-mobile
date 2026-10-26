@@ -40,17 +40,57 @@ ${JSON_ONLY}
 ${sameLanguage(text)}`;
 }
 
-function outlinePrompt(text: string, role: string): string {
-  return `You are ${role}. You turn a voice note into a clear outline an expert would write. ${NOTE_FORMAT}
+/**
+ * Characters of a note up to which the Expert outline stays short (T-1004): a note of a few
+ * sentences gets a few bullets, and the token room stays what it was. As on the computer.
+ */
+const OUTLINE_SHORT_CHARS = 600;
+
+// Most tokens an Expert outline may ask for, however long the note
+const OUTLINE_MAX_TOKENS = 10_000;
+
+/**
+ * Token room of the Expert outline call (T-1004, as on the computer). A long note gets a long, detailed
+ * outline, so the room grows with the note: 3,000 up to OUTLINE_SHORT_CHARS, then about 1.6 more per
+ * character of the note (a ~700-word Vietnamese note of 4,000 characters gets about 8,400), never above
+ * OUTLINE_MAX_TOKENS. Groq counts the room asked for against the per-minute allowance, so a short note
+ * must not ask for more than it needs.
+ */
+export function outlineMaxTokens(text: string): number {
+  const chars = clip(text).length;
+  if (chars <= OUTLINE_SHORT_CHARS) return NOTE_MAX_TOKENS.outline;
+  return Math.min(OUTLINE_MAX_TOKENS, NOTE_MAX_TOKENS.outline + Math.round((chars - OUTLINE_SHORT_CHARS) * 1.6));
+}
+
+/**
+ * The Expert outline (T-1004), word for word the computer's (spetotext notePrompts.ts, T-1003). The person
+ * has ten years of turning ideas into products; the outline follows the idea's length, keeps every idea of
+ * the person and puts market knowledge in its own sections, marked as inference.
+ */
+export function outlinePrompt(text: string, role: string): string {
+  return `You are ${role}, with ten years of experience turning raw ideas into real products: you know the market and the competitors, how such a product is built, and how it earns money. You turn a voice note into the working document you would write for the person from it. ${NOTE_FORMAT}
 
 ${JSON_ONLY}
 {"outline": "..."}
 
-- "outline": plain text laid out as three sections. Each section is a heading line starting with "## " followed by "- " bullet points: first the main idea (only what the person said, in your clearer words), then the gaps, risks and open questions an expert in this field would raise, then the three best first steps. A short note gets a short outline.
-- The headings are written in the same language as the bullets under them.
-- Your expert judgement belongs in the second and third sections; the first stays true to the note.
+- "outline": plain text. Each section is a heading line starting with "## ", followed by "- " bullet points; inside "Features in detail", a line starting with "### " names each group of features, with its bullets under it. A bullet carries the detail (one to three sentences), not a bare label.
+- The sections, in this order. Leave out one only when the note truly gives you nothing for it:
+  1. Summary: what the idea is, for whom and why, in your clearer words.
+  2. Users and the problem: who needs this, what hurts today, what they do instead.
+  3. Features in detail: every feature the person mentioned, grouped (for example by what the user does or by area of the product), each with what it does and why it matters. Add a missing feature only in the expert sections below, never here.
+  4. How it works, step by step: the flow from the user's first action to the result, in order.
+  5. Competitors and what sets this apart: the kinds of product and the well-known names an expert would compare it with, what they do well and where this idea can differ. This is your general knowledge, not the note's: mark each such statement as an inference to verify, in the note's language. Never state a price, a market size, a user count or a date.
+  6. Business model: how it could earn money and what drives cost, as options with the reasoning, marked as inference.
+  7. MVP: the smallest version that tests the idea, what is in it and what waits.
+  8. Risks and open questions: technical, market, legal and operational, each with why it matters; and what the person has not yet decided.
+  9. Next steps: the best first actions, in order, concrete enough to start.
+- Length follows the note. A note of a few sentences gets a short outline, only as long as the note has substance, with sections you have nothing to say for left out. A long note gets a long, detailed outline: a note of about 700 words should get roughly 1,500 to 2,500. Never pad with repetition or filler.
+- Keep EVERY idea the person said: go through the note idea by idea, and each one appears in the sections above, with its detail and the person's own examples. Do not merge several ideas into one label or drop the small ones.
+- Sections 1 to 4, 7 and the person's own decisions stay true to the note. Your expert judgement and knowledge belong in sections 5 and 6 and in what you add to 7 to 9, and the reader must be able to tell it from what the person said.
 ${ANTI_FABRICATION}
-${sameLanguage(text)}`;
+- You may use general knowledge of markets, products and technology, but do not invent figures, statistics, prices, funding, quotes or company facts. If you are not sure of something, say it needs checking.
+- The headings are written in the same language as the bullets under them.
+${sameLanguage(text)}`
 }
 
 function articlePrompt(text: string, role: string): string {
@@ -91,7 +131,7 @@ export async function makeBasics(text: string, meter?: AiMeter): Promise<NoteBas
 }
 
 export async function makeExpertOutline(text: string, role: string, meter?: AiMeter): Promise<string> {
-  const outline = parseExpertText(await chatJson(outlinePrompt(text, role), clip(text), NOTE_MAX_TOKENS.outline, 0.3, meter), 'outline');
+  const outline = parseExpertText(await chatJson(outlinePrompt(text, role), clip(text), outlineMaxTokens(text), 0.3, meter), 'outline');
   if (!outline) throw new Error('The outline came back empty. Try again.');
   return outline;
 }
