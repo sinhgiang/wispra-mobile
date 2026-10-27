@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { PanResponder, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { PanResponder, StyleSheet, Text, View, type GestureResponderEvent, type LayoutChangeEvent } from 'react-native';
 import Svg, { Circle, Defs, G, Line, Path, Pattern, Rect, Text as SvgText } from 'react-native-svg';
 
 import { Button, Card, Chip } from './ui';
@@ -17,37 +17,25 @@ import {
   TOGGLE_R,
   type LaidNode,
   type MapLayout,
+  type TreeNode,
 } from '@/lib/mind-map-layout';
+import { beginGesture, fitView, keepInReach, keepNodeInPlace, stepGesture, zoomAbout, type GestureBase, type MapView, type Pt } from '@/lib/mind-map-view';
 
 // The mind map as on the computer (T-0164): the picture is laid out by lib/mind-map-layout.ts and
 // drawn here with SVG. One finger moves the map, two fingers zoom it; − Fit + do the same with
 // buttons. A circle on a branch opens or closes it; tapping a node shows it in a card below.
+// Where the map is and how the fingers move it is lib/mind-map-view.ts (T-1000): opening or closing a
+// branch, or being given a copy of the same map, keeps the zoom and the place; only a new map, another
+// level or another width fits the map to the canvas again.
 
 const LEVELS: { value: number; label: string }[] = [
   { value: 2, label: '2' },
   { value: 3, label: '3' },
   { value: 0, label: 'All' },
 ];
-const MIN_K = 0.15;
-const MAX_K = 2.5;
 const CANVAS_HEIGHT = 440;
 // How long the system gets to draw the map as a picture before the map is shared as text instead
 export const SNAPSHOT_TIMEOUT_MS = 5000;
-const PAD = 24;
-
-interface View2 {
-  x: number;
-  y: number;
-  k: number;
-}
-
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-
-function fitView(layout: MapLayout, width: number, height: number): View2 {
-  const { w, h } = layout.bounds;
-  const k = clamp(Math.min((width - PAD * 2) / Math.max(w, 1), (height - PAD * 2) / Math.max(h, 1), 1.15), MIN_K, MAX_K);
-  return { x: (width - w * k) / 2, y: (height - h * k) / 2, k };
-}
 
 // What a screen needs to save the map as a picture (the Notes tab's "Download")
 export interface MapExporter {
@@ -55,98 +43,48 @@ export interface MapExporter {
   toPngBase64(): Promise<string | null>;
 }
 
+const touchesOf = (e: GestureResponderEvent): Pt[] => e.nativeEvent.touches.map((t) => ({ x: t.pageX, y: t.pageY }));
+
 export function MindMapView({ map, onExporter }: { map: MindMap; onExporter?: (exporter: MapExporter | null) => void }) {
   const svgRef = useRef<Svg>(null);
   const [exporting, setExporting] = useState(false);
-  const tree = useMemo(() => buildTree(map), [map]);
+  // A copy of the same map (the store gave it again) is not a new map: it would close the branches
+  // and put the map back at the size it began with
+  const [stable, setStable] = useState(map);
+  if (stable !== map && JSON.stringify(stable) !== JSON.stringify(map)) setStable(map);
+  const tree = useMemo(() => buildTree(stable), [stable]);
   const [level, setLevel] = useState(2);
   const [expanded, setExpanded] = useState<Set<string>>(() => expandedForLevel(tree, 2));
   const [selected, setSelected] = useState<string | null>(null);
   const [size, setSize] = useState({ width: 0, height: CANVAS_HEIGHT });
-  const [view, setView] = useState<View2>({ x: 0, y: 0, k: 1 });
+  const [view, setView] = useState<MapView>({ x: 0, y: 0, k: 1 });
   const layout = useMemo(() => layoutMap(tree, expanded), [tree, expanded]);
 
-  // A new map, or another level: the branches are opened again for it (state adjusted while rendering)
-  const [shownFor, setShownFor] = useState({ tree, level });
-  if (shownFor.tree !== tree || shownFor.level !== level) {
-    setShownFor({ tree, level });
-    setExpanded(expandedForLevel(tree, level));
-    setSelected(null);
-  }
-  // Fitted to the canvas when the shape of the map or the width changes, not on every pan
-  const [fittedFor, setFittedFor] = useState({ layout, width: size.width });
-  if (fittedFor.layout !== layout || fittedFor.width !== size.width) {
-    setFittedFor({ layout, width: size.width });
-    if (size.width > 0) setView(fitView(layout, size.width, size.height));
+  // A new map, another level or another width: the branches are opened as the level says and the map is
+  // fitted to the canvas (state adjusted while rendering). Opening or closing one branch is not here: it
+  // changes `expanded`, and the zoom and the place stay.
+  const [shownFor, setShownFor] = useState({ tree, level, width: size.width });
+  if (shownFor.tree !== tree || shownFor.level !== level || shownFor.width !== size.width) {
+    const reopened = shownFor.tree !== tree || shownFor.level !== level;
+    const open = reopened ? expandedForLevel(tree, level) : expanded;
+    setShownFor({ tree, level, width: size.width });
+    if (reopened) {
+      setExpanded(open);
+      setSelected(null);
+    }
+    if (size.width > 0) setView(fitView(layoutMap(tree, open).bounds, size.width, size.height));
   }
 
-  // One object for the gesture handlers below, kept up to date after each render
-  const [live] = useState(() => ({ view, size }));
+  // What the touches, the buttons and the circles do is in `controls`, made once; it reads what it needs
+  // from the screen after each render and puts a new view in at once, so two events in a row never read an
+  // old one
+  const [controls] = useState(() => createControls({ view, size, layout, expanded, tree }, setView, setExpanded));
   useEffect(() => {
-    Object.assign(live, { view, size });
+    Object.assign(controls.live, { view, size, layout, expanded, tree });
   });
-  const [gesture] = useState<{ current: { start: View2; dist: number; mid: { x: number; y: number } } | null }>(() => ({ current: null }));
+  const { toggle, zoomBy, fit } = controls;
 
-  // Made once; the handlers read the latest values from `live`
-  const [responder] = useState(() =>
-    PanResponder.create({
-        // Taps go to the nodes; a move of a few points is a pan or a pinch
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4 || g.numberActiveTouches > 1,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: () => {
-          gesture.current = { start: live.view, dist: 0, mid: { x: 0, y: 0 } };
-        },
-        onPanResponderMove: (e, g) => {
-          const state = gesture.current;
-          if (!state) return;
-          const touches = e.nativeEvent.touches;
-          if (touches.length >= 2) {
-            const [a, b] = touches;
-            const dist = Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
-            const mid = { x: (a.locationX + b.locationX) / 2, y: (a.locationY + b.locationY) / 2 };
-            if (state.dist === 0) {
-              state.dist = dist;
-              state.mid = mid;
-              state.start = live.view;
-              return;
-            }
-            const k = clamp(state.start.k * (dist / state.dist), MIN_K, MAX_K);
-            // The point under the fingers stays under the fingers
-            const px = (state.mid.x - state.start.x) / state.start.k;
-            const py = (state.mid.y - state.start.y) / state.start.k;
-            setView({ k, x: mid.x - px * k, y: mid.y - py * k });
-            return;
-          }
-          if (state.dist !== 0) return;
-          setView({ ...state.start, x: state.start.x + g.dx, y: state.start.y + g.dy });
-        },
-        onPanResponderRelease: () => {
-          gesture.current = null;
-        },
-        onPanResponderTerminate: () => {
-          gesture.current = null;
-        },
-      }),
-  );
-
-  const zoomBy = (factor: number) =>
-    setView((v) => {
-      const k = clamp(v.k * factor, MIN_K, MAX_K);
-      const cx = size.width / 2;
-      const cy = size.height / 2;
-      return { k, x: cx - ((cx - v.x) / v.k) * k, y: cy - ((cy - v.y) / v.k) * k };
-    });
-
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
-  const picture = useMemo(() => <MapPicture layout={layout} selected={selected} onToggle={toggle} onSelect={setSelected} />, [layout, selected]);
+  const picture = useMemo(() => <MapPicture layout={layout} selected={selected} onToggle={toggle} onSelect={setSelected} />, [layout, selected, toggle]);
 
   // The picture is drawn at twice its size so the text stays sharp when it is saved
   useEffect(() => {
@@ -193,15 +131,19 @@ export function MindMapView({ map, onExporter }: { map: MindMap; onExporter?: (e
         ))}
         <View style={styles.spacer} />
         <Chip label="−" active={false} onPress={() => zoomBy(1 / 1.25)} />
-        <Chip label="Fit" active={false} onPress={() => setView(fitView(layout, size.width, size.height))} />
+        <Chip label="Fit" active={false} onPress={fit} />
         <Chip label="+" active={false} onPress={() => zoomBy(1.25)} />
       </View>
 
       <View
+        ref={(node) => controls.setCanvas(node)}
         testID="mind-map-canvas"
         style={styles.canvas}
-        onLayout={(e: LayoutChangeEvent) => setSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}
-        {...responder.panHandlers}>
+        onLayout={(e: LayoutChangeEvent) => {
+          setSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height });
+          controls.measure();
+        }}
+        {...controls.responder.panHandlers}>
         <Svg width="100%" height="100%" style={StyleSheet.absoluteFill} pointerEvents="none">
           <Defs>
             <Pattern id="dots" width={26 * view.k} height={26 * view.k} patternUnits="userSpaceOnUse" x={view.x} y={view.y}>
@@ -211,13 +153,15 @@ export function MindMapView({ map, onExporter }: { map: MindMap; onExporter?: (e
           <Rect width="100%" height="100%" fill="url(#dots)" />
         </Svg>
         <View
+          testID="mind-map-layer"
           style={[
             styles.layer,
             {
               width: layout.bounds.w,
               height: layout.bounds.h,
               transformOrigin: 'top left',
-              transform: [{ translateX: view.x }, { translateY: view.y }, { scale: view.k }],
+              // The layer's corner is the map's top left; the view is where the map's centre is
+              transform: [{ translateX: view.x + layout.bounds.minX * view.k }, { translateY: view.y + layout.bounds.minY * view.k }, { scale: view.k }],
             },
           ]}>
           <Svg ref={svgRef} width={layout.bounds.w} height={layout.bounds.h} viewBox={`${layout.bounds.minX} ${layout.bounds.minY} ${layout.bounds.w} ${layout.bounds.h}`}>
@@ -240,6 +184,86 @@ export function MindMapView({ map, onExporter }: { map: MindMap; onExporter?: (e
       ) : null}
     </View>
   );
+}
+
+interface Live {
+  view: MapView;
+  size: { width: number; height: number };
+  layout: MapLayout;
+  expanded: Set<string>;
+  tree: TreeNode;
+}
+
+// The handlers of the map. Made once, outside the render: `live` is what the screen showed after its last
+// render, and the view the handlers change is put in `live` at once as well as on the screen.
+function createControls(
+  init: Live,
+  setView: (v: MapView) => void,
+  setExpanded: (e: Set<string>) => void,
+) {
+  let canvas: View | null = null;
+  const live = { ...init, origin: { x: 0, y: 0 } };
+  let gesture: GestureBase | null = null;
+
+  const put = (next: MapView) => {
+    const settled = keepInReach(next, live.layout.bounds, live.size.width, live.size.height);
+    live.view = settled;
+    setView(settled);
+  };
+  // Where the canvas is on the screen: the touches are in screen points
+  const measure = () => {
+    if (canvas && typeof canvas.measureInWindow === 'function') {
+      canvas.measureInWindow((x, y) => {
+        live.origin = { x, y };
+      });
+    }
+  };
+  const responder = PanResponder.create({
+    // Taps go to the nodes; a move of a few points is a pan or a pinch
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4 || g.numberActiveTouches > 1,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: (e) => {
+      gesture = beginGesture(live.view, touchesOf(e));
+      measure();
+    },
+    onPanResponderMove: (e) => {
+      const touches = touchesOf(e);
+      if (!gesture) gesture = beginGesture(live.view, touches);
+      const step = stepGesture(gesture, touches, live.origin);
+      gesture = step.base;
+      put(step.view);
+    },
+    onPanResponderRelease: () => {
+      gesture = null;
+    },
+    onPanResponderTerminate: () => {
+      gesture = null;
+    },
+  });
+
+  return {
+    live,
+    measure,
+    setCanvas: (node: View | null) => {
+      canvas = node;
+    },
+    responder,
+    fit: () => put(fitView(live.layout.bounds, live.size.width, live.size.height)),
+    zoomBy: (factor: number) => put(zoomAbout(live.view, factor, { x: live.size.width / 2, y: live.size.height / 2 })),
+    // Opens or closes a branch. The branch that was touched stays under the finger and the zoom is not
+    // touched: the others make room around it.
+    toggle: (id: string) => {
+      const next = new Set(live.expanded);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      const before = live.layout.nodes.find((n) => n.id === id);
+      const after = layoutMap(live.tree, next).nodes.find((n) => n.id === id);
+      if (before && after) put(keepNodeInPlace(live.view, before, after));
+      live.expanded = next;
+      setExpanded(next);
+    },
+  };
 }
 
 function MapPicture({ layout, selected, onToggle, onSelect }: { layout: MapLayout; selected: string | null; onToggle: (id: string) => void; onSelect: (id: string | null) => void }) {
