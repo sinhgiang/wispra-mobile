@@ -1,9 +1,11 @@
 // The AI work of a note (T-0979): the mind map is checked and repaired at most twice, then shown as
 // text; a connection problem is not taken for a bad map; the tokens Wispra Cloud bills are added up.
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { AiError, billedTokens, newMeter } from '../ai';
-import { MAP_REPAIRS, makeBasics, makeExpertArticle, makeExpertOutline, makeNoteMap, NOTE_CHARS } from '../note-ai';
+import { MAP_REPAIRS, makeBasics, makeExpertArticle, makeExpertOutline, makeNoteMap, NOTE_CHARS, OUTLINE_HEADINGS_VI, outlineMaxTokens, outlinePrompt } from '../note-ai';
 
 const mockChatJson = jest.fn<(system: string, user: string, maxTokens: number, temperature?: number) => Promise<unknown>>();
 jest.mock('../ai', () => {
@@ -72,6 +74,82 @@ describe('the expert outline and article', () => {
     await makeExpertArticle(ENGLISH, 'a travel expert');
     expect(mockChatJson.mock.calls[0][0]).toMatch(/NEVER invent facts/);
     expect(mockChatJson.mock.calls[1][0]).toMatch(/do not state invented facts/);
+  });
+});
+
+describe('the expert outline is as long and detailed as the computer’s (T-1004)', () => {
+  it('asks like a ten-year product expert, in the computer’s own words', () => {
+    // The text the computer (spetotext notePrompts.ts, T-1003) writes for the same role and note
+    const computer = fs.readFileSync(path.join(__dirname, 'fixtures', 'outline-prompt-computer.txt'), 'utf8').replaceAll('\r\n', '\n');
+    expect(outlinePrompt(ENGLISH, 'a travel expert')).toBe(computer);
+    // The same for a Vietnamese note (commit 6b40307 of the computer: the headings are given in Vietnamese)
+    const computerVi = fs.readFileSync(path.join(__dirname, 'fixtures', 'outline-prompt-computer-vi.txt'), 'utf8').replaceAll('\r\n', '\n');
+    expect(outlinePrompt(VIETNAMESE, 'chuyên gia du lịch')).toBe(computerVi);
+  });
+
+  it('gives a Vietnamese note its nine headings in Vietnamese, so they do not come back in English', () => {
+    const prompt = outlinePrompt(VIETNAMESE, 'chuyên gia du lịch');
+    expect(OUTLINE_HEADINGS_VI).toHaveLength(9);
+    const at = OUTLINE_HEADINGS_VI.map((h) => prompt.indexOf(`"## ${h}"`));
+    expect(at.every((x) => x >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(prompt).toContain('Never write a heading in English');
+    expect(prompt).toContain('suy luận, cần kiểm chứng');
+    // The English names only describe the sections
+    expect(prompt).toContain('their names here are English only to describe them');
+    expect(prompt).not.toContain('TRANSLATE every section name');
+  });
+
+  it('tells a note in another language to translate the section and group names', () => {
+    const french = 'Je veux construire une plateforme où des guides locaux proposent eux-mêmes leurs circuits.';
+    for (const text of [ENGLISH, french]) {
+      const prompt = outlinePrompt(text, 'a travel expert');
+      expect(prompt).toContain('TRANSLATE every section name, and every group name under "Features in detail", into the language of the note');
+      expect(prompt).not.toContain('"## Tóm tắt"');
+    }
+  });
+
+  it('has the nine sections in order, keeps every idea, and names feature groups with ### lines', () => {
+    const prompt = outlinePrompt(ENGLISH, 'a travel expert');
+    expect(prompt).toContain('ten years of experience turning raw ideas into real products');
+    const names = ['Summary', 'Users and the problem', 'Features in detail', 'How it works', 'Competitors and what sets this apart', 'Business model', 'MVP', 'Risks and open questions', 'Next steps'];
+    const at = names.map((n, i) => prompt.indexOf(`${i + 1}. ${n}`));
+    expect(at.every((x) => x >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(prompt).toContain('a line starting with "### " names each group of features');
+    expect(prompt).toContain('Keep EVERY idea the person said');
+    expect(prompt).toContain('Length follows the note');
+    expect(prompt).toContain('mark each such statement as an inference to verify');
+    // The honesty rules stay: nothing invented, no figures
+    expect(prompt).toMatch(/NEVER invent facts/);
+    expect(prompt).toContain('Never state a price, a market size, a user count or a date');
+  });
+
+  it('keeps the language of the note', () => {
+    expect(outlinePrompt(VIETNAMESE, 'chuyên gia du lịch')).toContain('Write everything in Vietnamese');
+    expect(outlinePrompt(ENGLISH, 'r')).toContain('SAME language as the note');
+  });
+
+  it('gives the answer more room as the note grows, never above 10,000, and a short note the old 3,000', async () => {
+    expect(outlineMaxTokens('a few words')).toBe(3000);
+    expect(outlineMaxTokens('a'.repeat(600))).toBe(3000);
+    expect(outlineMaxTokens('a'.repeat(4000))).toBe(8440);
+    expect(outlineMaxTokens('a'.repeat(5000))).toBe(10_000);
+    expect(outlineMaxTokens('a'.repeat(NOTE_CHARS * 3))).toBe(10_000);
+    // It grows with the length, step by step
+    expect(outlineMaxTokens('a'.repeat(1500))).toBeGreaterThan(outlineMaxTokens('a'.repeat(1000)));
+
+    mockChatJson.mockResolvedValue({ outline: 'x' });
+    await makeExpertOutline('a short idea', 'r');
+    await makeExpertOutline('a'.repeat(4000), 'r');
+    expect(mockChatJson.mock.calls[0][2]).toBe(3000);
+    expect(mockChatJson.mock.calls[1][2]).toBe(8440);
+  });
+
+  it('keeps ### lines of the answer as written', async () => {
+    const outline = ['## Features in detail', '### Booking', '- Guests pick a date.'].join('\n');
+    mockChatJson.mockResolvedValueOnce({ outline });
+    expect(await makeExpertOutline(ENGLISH, 'r')).toBe(outline);
   });
 });
 
