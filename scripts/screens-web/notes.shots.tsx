@@ -116,6 +116,50 @@ const OUTLINE = [
   '- Try collecting payments with PayPal and a local gateway.',
   '- Interview eight guides in Cao Bang.',
 ].join('\n');
+// A long idea (T-1004): the outline of the same note before (three short sections) and after (nine sections, feature groups)
+const LONG_SAID =
+  'I want an app where a small tour company puts its tours online and takes bookings. Guests pick a date and a group size and pay a deposit. The guide gets the booking on the phone and confirms it. If it rains, the guest can move the date once for free. I want a calendar that shows which guides are free, a page for each tour with photos and a map of the route, and reviews that only people who took the tour can leave. Payments should go to the company, and the guide is paid after the tour. Later I would like a chat between the guest and the guide, and a report each month of what was booked and what was cancelled.';
+const OLD_OUTLINE = [
+  '## Main idea',
+  '- An app where a small tour company puts its tours online and takes bookings with a deposit.',
+  '## Gaps and risks',
+  '- Refunds, rain and cancellations need clear rules.',
+  '## First three steps',
+  '- Write the booking rules.',
+  '- Draw the booking screen.',
+  '- Try it with one guide.',
+].join('\n');
+const LONG_OUTLINE = [
+  '## Summary',
+  '- A booking app for a small tour company: guests choose a date and a group size, pay a deposit, and the guide confirms on the phone. It exists because small companies lose bookings to chat messages and late replies.',
+  '## Users and the problem',
+  '- Guests want a date, a price and a yes in one sitting. Today they wait for a reply in a chat and pay by bank transfer.',
+  '- Guides want to see who is coming and when, without a spreadsheet.',
+  '## Features in detail',
+  '### Booking and payment',
+  '- The guest picks a date and a group size and pays a deposit. The company receives the money; the guide is paid after the tour.',
+  '- If it rains, the guest can move the date once for free.',
+  '### Guides and calendar',
+  '- A calendar shows which guides are free on which day, so a booking never lands on a busy guide.',
+  '- The guide gets each booking on the phone and confirms it.',
+  '### Tour pages and reviews',
+  '- Each tour has its own page with photos and a map of the route.',
+  '- Only people who took the tour can leave a review.',
+  '### Later',
+  '- A chat between the guest and the guide, and a monthly report of what was booked and what was cancelled.',
+  '## How it works, step by step',
+  '- The guest opens a tour page, picks a date and a group size, and pays the deposit. The guide sees the booking, confirms it, and the guest gets the confirmation.',
+  '## Competitors and what sets this apart',
+  '- Large booking marketplaces and simple booking plugins are the usual comparison (inference to verify). This idea differs by paying the guide after the tour and by reviews from real guests only.',
+  '## Business model',
+  '- A fee on each booking, or a monthly fee per company (inference to verify).',
+  '## MVP',
+  '- One tour page, the booking and the deposit, the guide’s confirmation. The calendar, chat and report wait.',
+  '## Risks and open questions',
+  '- Refund rules when it rains twice. Who pays the payment fee. What happens when a guide cancels.',
+  '## Next steps',
+  '- Write the booking and rain rules. Draw the booking screen. Try it with one guide for a month.',
+].join('\n');
 const MAP = {
   title: 'Local tour platform',
   note: 'Local people list tours and guide their own guests.',
@@ -141,6 +185,8 @@ const main = note('mobile-n1', 'Local tour platform', new Date(2026, 9, 25, 14, 
   mindMap: MAP,
   usage: { outline: { tokens: 2412, at: '2026-10-25T07:40:00.000Z' } },
 });
+const longNote = (data: Partial<NoteData>) =>
+  note('mobile-n6', 'Booking app for a small tour company', new Date(2026, 9, 27, 9, 12), { domain: 'Travel', role: 'a travel-market development expert', ...data }, { text: LONG_SAID });
 const LIST: Entry[] = [
   main,
   note('mobile-n2', 'Car service plan by mileage', new Date(2026, 9, 23, 8, 51), { domain: 'Cars', status: 'keep' }, { text: 'A service plan priced by kilometres instead of by visit, with one price list shown before the car goes in.' }),
@@ -178,11 +224,11 @@ function flattenNestedButtons(html: string): string {
   return nested ? html.replace(/<button(?![a-z])/g, '<div').replace(/<[/]button>/g, '</div>').replace(/ type="button"/g, '') : html;
 }
 
-function page(name: string, css: string, rawBody: string): void {
+function page(name: string, css: string, rawBody: string, height?: number): void {
   const body = flattenNestedButtons(rawBody);
   fs.mkdirSync(OUT, { recursive: true });
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${name}</title>
-<style>html,body{margin:0;height:100%;background:#0f1117}#root{display:flex;flex-direction:column;width:100vw;height:100vh;overflow:hidden;background:#0f1117;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}</style>
+<style>html,body{margin:0;height:100%;background:#0f1117}#root{display:flex;flex-direction:column;width:100vw;height:${height ? `${height}px` : '100vh'};overflow:hidden;background:#0f1117;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}</style>
 <style id="rnw">${css}</style></head><body><div id="root">${body}</div></body></html>`;
   fs.writeFileSync(path.join(OUT, `${name}.html`), html);
 }
@@ -228,10 +274,11 @@ async function press(container: HTMLElement, label: string): Promise<void> {
   });
 }
 
-async function shot(name: string, element: React.ReactElement, steps: (c: HTMLElement) => Promise<void> = async () => undefined): Promise<void> {
+// `height` makes a tall picture (a long outline shown whole); the phone's screen is 844 high
+async function shot(name: string, element: React.ReactElement, steps: (c: HTMLElement) => Promise<void> = async () => undefined, height = 844): Promise<void> {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement('div');
-  container.style.cssText = 'display:flex;flex:1;flex-direction:column;height:844px';
+  container.style.cssText = `display:flex;flex:1;flex-direction:column;height:${height}px`;
   document.body.appendChild(container);
   const root = createRoot(container);
   await act(async () => root.render(element));
@@ -244,7 +291,7 @@ async function shot(name: string, element: React.ReactElement, steps: (c: HTMLEl
   });
   keepLineClamps(container);
   const sheet = (StyleSheet as unknown as { getSheet(): { textContent: string } }).getSheet();
-  page(name, sheet.textContent, container.innerHTML);
+  page(name, sheet.textContent, container.innerHTML, height === 844 ? undefined : height);
   await act(async () => root.unmount());
   container.remove();
 }
@@ -283,6 +330,20 @@ describe('pictures of the Notes screens, with Meetings and History beside them',
       await press(c, '+');
       await press(c, '+');
       await press(c, 'Open Model (2)');
+    });
+  });
+
+  it('T-1004: the Expert outline of a long idea, with feature groups, beside a short note’s short outline', async () => {
+    const name = process.env.WISPRA_SHOTS_PREFIX ?? 'after';
+    mockEntries = [longNote({ outline: name === 'before-old' ? OLD_OUTLINE : LONG_OUTLINE }), ...LIST];
+    mockId = 'mobile-n6';
+    await shot(`${name}-long-note-expert`, <NoteScreen />, async (c) => {
+      await press(c, 'Expert');
+    }, 2300);
+    mockEntries = [...LIST];
+    mockId = 'mobile-n1';
+    await shot(`${name}-short-note-expert`, <NoteScreen />, async (c) => {
+      await press(c, 'Expert');
     });
   });
 

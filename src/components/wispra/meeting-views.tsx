@@ -19,13 +19,14 @@ export function TabChips<T extends string>({ tabs, value, onChange }: { tabs: { 
   );
 }
 
-// Summary text as the AI writes it: paragraphs, "## " headings and "- " bullets
+// Summary text as the AI writes it: paragraphs, "## " headings ("### " a smaller one: a group inside a section, T-1004) and "- " bullets
 export function SummaryText({ text }: { text: string }) {
   const blocks = text.split('\n').map((l) => l.trimEnd());
   return (
     <View style={styles.summary}>
       {blocks.map((line, i) => {
         if (!line.trim()) return <View key={i} style={styles.gap} />;
+        if (line.startsWith('### ')) return <Text key={i} style={styles.group}>{line.slice(4)}</Text>;
         if (line.startsWith('## ')) return <Text key={i} style={styles.heading}>{line.slice(3)}</Text>;
         if (/^\s*[-•]\s+/.test(line))
           return (
@@ -250,6 +251,7 @@ const styles = StyleSheet.create({
   summary: { gap: 6 },
   gap: { height: 4 },
   heading: { color: W.accentSoft, fontSize: 14, fontWeight: '600', marginTop: 4 },
+  group: { color: W.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
   body: { color: W.text, fontSize: 14, lineHeight: 21 },
   bullet: { flexDirection: 'row', gap: Gap.s, paddingRight: Gap.s },
   dot: { color: W.accentSoft, fontSize: 14, lineHeight: 21 },

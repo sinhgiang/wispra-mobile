@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Share } from 'react-native';
+import { Share, StyleSheet } from 'react-native';
 
 import type { Entry } from '@/lib/entries';
 import type { NoteData } from '@/lib/notes';
@@ -233,6 +233,30 @@ describe('a note: three views, laid out like a meeting', () => {
     expect(mockCopied).toEqual(['## Ý chính\n- Nền tảng tour']);
     // The AI’s rewrite never takes the place of the words, and the page says where it was written
     expect(screen.getByText(/Rewrites are written by Wispra Cloud’s AI. Your original words are always kept/)).toBeTruthy();
+  });
+
+  it('a ### line of the outline is the name of a feature group, smaller than the section heading, with no ### on the screen (T-1004)', async () => {
+    const outline = ['## Tính năng chi tiết', '### Đặt tour', '- Khách chọn ngày và số người.', '### Thanh toán', '- Hoàn tiền rõ ràng.', '## Bước tiếp theo', '- Phỏng vấn tám hướng dẫn viên.'].join('\n');
+    mockEntries = [note({}, { outline })];
+    await render(<NoteScreen />);
+    await fireEvent.press(screen.getByText('Expert'));
+    const section = StyleSheet.flatten(screen.getByText('Tính năng chi tiết').props.style);
+    const group = StyleSheet.flatten(screen.getByText('Đặt tour').props.style);
+    expect(screen.getByText('Thanh toán')).toBeTruthy();
+    expect(group.fontSize).toBeLessThan(section.fontSize);
+    expect(group.fontSize).toBeGreaterThanOrEqual(12);
+    expect(group.fontWeight).toBe('600');
+    // The bullets under a group are still bullets, and no "###" is left on the screen
+    expect(screen.getByText('Khách chọn ngày và số người.')).toBeTruthy();
+    expect(screen.queryByText(/###/)).toBeNull();
+    expect(screen.queryByText(/^##/)).toBeNull();
+  });
+
+  it('a short note’s short outline looks as it did: headings and bullets only', async () => {
+    await render(<NoteScreen />);
+    await fireEvent.press(screen.getByText('Expert'));
+    expect(screen.getByText('Ý chính')).toBeTruthy();
+    expect(screen.getByText('Nền tảng tour')).toBeTruthy();
   });
 
   it('Rewrite writes the outline again; Post has its own copy of the work, with versions', async () => {
