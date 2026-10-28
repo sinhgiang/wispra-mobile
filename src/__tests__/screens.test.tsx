@@ -48,7 +48,18 @@ jest.mock('@/lib/storage', () => ({
     mockLanguageSaves.push(l);
   },
 }));
-jest.mock('@/modules/wispra-dictation', () => ({ setTranscribeLanguage: (l: string) => mockNativeLanguage.push(l) }));
+// The recording indicator's Android button (T-1073): whether this build has it, and whether the person allowed it
+let mockBubbleSupported = false;
+let mockOverlayAllowed = false;
+const mockOpenOverlay = jest.fn();
+jest.mock('@/modules/wispra-dictation', () => ({
+  setTranscribeLanguage: (l: string) => mockNativeLanguage.push(l),
+  get bubbleSupported() {
+    return mockBubbleSupported;
+  },
+  canShowRecordingBubble: () => mockOverlayAllowed,
+  openOverlaySettings: () => mockOpenOverlay(),
+}));
 jest.mock('expo-audio', () => ({ useAudioPlayer: () => ({}), useAudioPlayerStatus: () => ({}) }));
 jest.mock('@/modules/wispra-keyboard-bridge', () => ({
   startSession: (m: number) => mockStartSession(m),
@@ -139,6 +150,40 @@ describe('Account › Dictate in other apps', () => {
     await fireEvent.press(screen.getByText('Wispra keyboard'));
     await fireEvent.press(screen.getByText('Mic button'));
     expect(mockPush.mock.calls).toEqual([['/keyboard-setup'], ['/dictation-setup']]);
+  });
+});
+
+describe('Account › While recording (T-1073)', () => {
+  afterEach(() => {
+    mockBubbleSupported = false;
+    mockOverlayAllowed = false;
+    mockOpenOverlay.mockClear();
+  });
+
+  it('has no such row on iPhone: the Live Activity needs nothing from here', async () => {
+    await render(<AccountScreen />);
+    expect(screen.queryByText('While recording')).toBeNull();
+    expect(screen.queryByText('Wave over other apps')).toBeNull();
+  });
+
+  it('on Android, says the wave over other apps is off until the person allows it, and opens the setting that allows it', async () => {
+    mockSetup = android;
+    mockBubbleSupported = true;
+    await render(<AccountScreen />);
+    expect(screen.getByText('While recording')).toBeTruthy();
+    expect(screen.getByText('Off')).toBeTruthy();
+    expect(screen.getByText(/Needs “Display over other apps”/)).toBeTruthy();
+    await fireEvent.press(screen.getByText('Wave over other apps'));
+    expect(mockOpenOverlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('on Android, says it is on once it is allowed', async () => {
+    mockSetup = android;
+    mockBubbleSupported = true;
+    mockOverlayAllowed = true;
+    await render(<AccountScreen />);
+    expect(screen.getByText('On')).toBeTruthy();
+    expect(screen.getByLabelText('Wave over other apps: on. Open the setting')).toBeTruthy();
   });
 });
 

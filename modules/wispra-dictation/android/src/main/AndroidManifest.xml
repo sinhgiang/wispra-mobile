@@ -3,6 +3,9 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <!-- The recording indicator, a faint button over other apps while Wispra records (T-1073); the person
+       gives it in Settings > Display over other apps. -->
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
   <!-- Lets the service read the name of the app a dictation was made in ("Messages", "Zalo") for
        History. Since Android 11 other apps' names are hidden unless declared here. -->

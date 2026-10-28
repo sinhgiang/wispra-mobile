@@ -12,6 +12,7 @@ import { createEntry, newId, type EntryKind } from './entries';
 import { useEntries } from './entries-store';
 import { needsSplit, shouldStartNextSegment } from './meeting';
 import { PIECE_RECORDING } from './recording-options';
+import { useRecordingIndicator, type IndicatorStatus } from './recording-indicator';
 import {
   NOTICE_ENDED_OUTSIDE,
   NOTICE_INTERRUPTED,
@@ -82,6 +83,11 @@ export function usePieceRecording(kind: EntryKind, options: PieceRecordingOption
   const watch = useRef<Watch>(WATCH_START);
   // Which recorder the next try after an interruption uses (a failed try may leave one prepared)
   const tries = useRef(0);
+
+  // The small indicator while recording: a Live Activity on iPhone, a faint button on Android (T-1073). Not for a
+  // recording that must end when the person leaves the app.
+  const indicator: IndicatorStatus | null = !wantsBackground ? null : phase === 'recording' ? (interrupted ? 'interrupted' : 'recording') : phase === 'paused' ? 'paused' : null;
+  useRecordingIndicator(kind, indicator, elapsedMs);
 
   const other = (r: AudioRecorder | null) => (r === first ? second : first);
 

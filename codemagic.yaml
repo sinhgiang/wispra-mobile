@@ -34,11 +34,12 @@ workflows:
       - /tmp/xcodebuild_logs/*.log
 
   # Run once before the first TestFlight build (and again if a profile is missing). In the Apple
-  # Developer account it registers the bundle id of the Wispra keyboard extension if needed, and
-  # creates the App Store provisioning profiles of the app and of the keyboard, tied to the team's
+  # Developer account it registers the bundle ids of the Wispra keyboard extension and of the recording indicator extension
+  # (T-1073, the Live Activity) if needed, and
+  # creates the App Store provisioning profiles of the app, of the keyboard and of the recording indicator, tied to the team's
   # valid distribution certificates (the one Codemagic generated for Lenvid among them), using the
   # App Store Connect API key lenvid-asc. "Fetch profiles" in Codemagic only lists profiles that
-  # already exist there; after this run it lists these two. Needs no secret: the integration
+  # already exist there; after this run it lists these three. Needs no secret: the integration
   # supplies the API key, and making a profile needs only the certificates' ids, never their private
   # keys. A profile that is already there is left as it is. Signs nothing and uploads nothing.
   ios-create-profile:
@@ -75,7 +76,8 @@ workflows:
           # bundle id | name of the bundle id (if it has to be registered) | profile name
           for line in \
             "com.sinhgiang.wispramobile|Wispra|Wispra App Store" \
-            "com.sinhgiang.wispramobile.keyboard|Wispra Keyboard|Wispra Keyboard App Store"; do
+            "com.sinhgiang.wispramobile.keyboard|Wispra Keyboard|Wispra Keyboard App Store" \
+            "com.sinhgiang.wispramobile.recording|Wispra Recording|Wispra Recording App Store"; do
             IFS='|' read -r bundle_id bundle_name profile_name <<< "$line"
             existing=$(app-store-connect profiles list --type IOS_APP_STORE --name "$profile_name" --state ACTIVE --json | ids)
             if [ -n "$existing" ]; then
@@ -93,8 +95,8 @@ workflows:
             echo "Created the App Store profile '$profile_name' for $bundle_id."
           done
           echo "Next: Codemagic > Team settings > codemagic.yaml settings > Code signing identities >"
-          echo "iOS provisioning profiles > Fetch profiles, select 'Wispra App Store' and 'Wispra Keyboard App Store',"
-          echo "Reference names wispra-app-store and wispra-keyboard-app-store, Download selected."
+          echo "iOS provisioning profiles > Fetch profiles, select 'Wispra App Store', 'Wispra Keyboard App Store' and 'Wispra Recording App Store',"
+          echo "Reference names wispra-app-store, wispra-keyboard-app-store and wispra-recording-app-store, Download selected."
 
   # Signed build, uploaded to App Store Connect so it appears in TestFlight for internal
   # testers. It is never sent to App Review or to external beta review: those stay manual steps
