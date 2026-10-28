@@ -80,14 +80,24 @@ export interface MeetingNotes {
 // so the transcript keeps up with the meeting and the last words after Stop come quickly (T-0164)
 export const SEGMENT_MIN_MS = 12_000;
 export const SEGMENT_MAX_MS = 20_000;
+// A dictation or a note has no live transcript to keep up with, and its words read better with fewer
+// joins: longer pieces, still under SPLIT_OVER_MS so none is cut again before it is transcribed (T-1072)
+export const LONG_SEGMENT_MIN_MS = 30_000;
+export const LONG_SEGMENT_MAX_MS = 40_000;
+
+// How long a piece is for a kind of recording
+export function segmentRules(kind: 'dictation' | 'meeting' | 'note'): { minMs: number; maxMs: number } {
+  return kind === 'meeting' ? { minMs: SEGMENT_MIN_MS, maxMs: SEGMENT_MAX_MS } : { minMs: LONG_SEGMENT_MIN_MS, maxMs: LONG_SEGMENT_MAX_MS };
+}
 // Below this level (dBFS from the recorder's metering) the room counts as quiet
 export const QUIET_DB = -40;
 
 // Start the next piece at a quiet moment once the piece is long enough, or anyway at the maximum,
 // so a word is rarely cut in two.
-export function shouldStartNextSegment(segmentMs: number, meteringDb: number | undefined): boolean {
-  if (segmentMs >= SEGMENT_MAX_MS) return true;
-  if (segmentMs < SEGMENT_MIN_MS) return false;
+export function shouldStartNextSegment(segmentMs: number, meteringDb: number | undefined, kind: 'dictation' | 'meeting' | 'note' = 'meeting'): boolean {
+  const { minMs, maxMs } = segmentRules(kind);
+  if (segmentMs >= maxMs) return true;
+  if (segmentMs < minMs) return false;
   return meteringDb !== undefined && meteringDb < QUIET_DB;
 }
 
@@ -210,15 +220,19 @@ export function meetingStatus(segments: MeetingSegment[]): 'pending' | 'failed' 
 }
 
 export const NO_SOUND_IN_MEETING = 'No sound was recorded in this meeting. Check that Wispra may use the microphone.';
+export const NO_SOUND_IN_RECORDING = 'No sound was recorded. Check that Wispra may use the microphone.';
 
 // What a meeting shows once its pieces are through: its words, and why when there are none. A
 // meeting where nothing came out of any piece (no sound recorded) says so, instead of looking done
 // and empty (T-0154 review).
-export function finishedMeeting(segments: MeetingSegment[]): { status: 'pending' | 'failed' | 'done'; text: string | null; error: string | null } {
+export function finishedMeeting(
+  segments: MeetingSegment[],
+  kind: 'dictation' | 'meeting' | 'note' = 'meeting',
+): { status: 'pending' | 'failed' | 'done'; text: string | null; error: string | null } {
   const status = meetingStatus(segments);
   const text = plainText(segments) || null;
   if (status === 'failed') return { status, text, error: 'Some parts could not be transcribed. Their audio is kept; tap Try again.' };
-  if (status === 'done' && !text && segments.length > 0) return { status, text, error: NO_SOUND_IN_MEETING };
+  if (status === 'done' && !text && segments.length > 0) return { status, text, error: kind === 'meeting' ? NO_SOUND_IN_MEETING : NO_SOUND_IN_RECORDING };
   return { status, text, error: null };
 }
 

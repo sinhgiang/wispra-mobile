@@ -8,6 +8,7 @@ import { Button, Card, Label, MicGlyph, Title, ui } from '@/components/wispra/ui
 import { Gap, W } from '@/constants/wispra';
 import { formatDuration, sortEntries } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
+import { HINT_BACKGROUND_BUTTON } from '@/lib/recording-watch';
 import { transcriptionAvailable } from '@/lib/transcriber';
 import { useRecording } from '@/lib/use-recording';
 
@@ -42,6 +43,7 @@ export default function DictateScreen() {
               <Pressable accessibilityRole="button" accessibilityLabel="Stop and save" onPress={finish} style={styles.stop}>
                 <View style={styles.square} />
               </Pressable>
+              <Label style={styles.center}>{HINT_BACKGROUND_BUTTON}</Label>
               <Button label="Cancel" onPress={rec.cancel} />
             </>
           ) : (
@@ -57,6 +59,7 @@ export default function DictateScreen() {
               <Label style={styles.center}>Tap to speak. Tap ■ when you are done.</Label>
             </>
           )}
+          {rec.notice ? <Text style={styles.notice}>{rec.notice}</Text> : null}
           {rec.error ? <Text style={styles.error}>{rec.error}</Text> : null}
           {savedId && !live ? (
             <Text style={styles.saved}>
@@ -90,6 +93,7 @@ const styles = StyleSheet.create({
   live: { color: W.red, fontSize: 14, fontWeight: '600' },
   center: { textAlign: 'center' },
   error: { color: W.red, fontSize: 13, textAlign: 'center' },
+  notice: { color: W.amber, fontSize: 13, textAlign: 'center', lineHeight: 19 },
   saved: { color: W.muted, fontSize: 13, textAlign: 'center', lineHeight: 19 },
   list: { gap: Gap.s + 2 },
 });

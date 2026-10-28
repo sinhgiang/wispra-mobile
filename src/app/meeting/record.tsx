@@ -39,6 +39,11 @@ export default function RecordMeetingScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The recording was ended from outside the app (Android: Stop on the notification); it is saved
+  useEffect(() => {
+    if (rec.endedId) router.replace({ pathname: '/meeting/[id]', params: { id: rec.endedId } });
+  }, [rec.endedId]);
+
   const finish = async () => {
     const id = await rec.stop();
     if (id) router.replace({ pathname: '/meeting/[id]', params: { id } });
@@ -96,6 +101,8 @@ export default function RecordMeetingScreen() {
           placeholderTextColor={W.faint}
         />
       </View>
+
+      {rec.notice ? <Text style={styles.notice}>{rec.notice}</Text> : null}
 
       <TabChips tabs={TABS} value={tab} onChange={setTab} />
 
@@ -183,6 +190,7 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: W.red },
   status: { color: W.red, fontSize: 13, fontWeight: '600' },
   live: { marginLeft: 'auto', color: W.muted, fontSize: 12 },
+  notice: { color: W.amber, fontSize: 13, lineHeight: 19, paddingHorizontal: Gap.xl, paddingBottom: Gap.s },
   title: { color: W.text, fontSize: 22, fontWeight: '700', padding: 0 },
   body: { paddingHorizontal: Gap.xl, paddingBottom: Gap.l, gap: Gap.l },
   line: { gap: 4 },

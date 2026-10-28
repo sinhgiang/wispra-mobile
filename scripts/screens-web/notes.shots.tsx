@@ -22,6 +22,7 @@ const { createRoot } = require('react-dom/client') as {
 let mockEntries: Entry[] = [];
 let mockId = 'mobile-n1';
 let mockPhase = 'idle';
+let mockNotice: string | null = null;
 let mockTab = 'notes';
 const mockBusy = new Set<string>();
 
@@ -52,7 +53,7 @@ jest.mock('@/lib/storage', () => ({ audioExists: () => true }));
 jest.mock('@/lib/use-session', () => ({ useSession: () => ({ email: 'anna@example.com' }) }));
 jest.mock('@/lib/transcriber', () => ({ transcriptionAvailable: () => true }));
 jest.mock('@/lib/use-recording', () => ({
-  useRecording: () => ({ phase: mockPhase, durationMs: 14_000, error: null, start: jest.fn(), stop: jest.fn(), cancel: jest.fn() }),
+  useRecording: () => ({ phase: mockPhase, durationMs: 14_000, error: null, notice: mockNotice, start: jest.fn(), stop: jest.fn(), cancel: jest.fn() }),
 }));
 jest.mock('@/lib/entries-store', () => ({
   useEntries: () => ({
@@ -73,6 +74,8 @@ jest.mock('@/lib/entries-store', () => ({
 
 // eslint-disable-next-line import/first
 import WispraTabs from '@/app/(tabs)/_layout';
+// eslint-disable-next-line import/first
+import DictateScreen from '@/app/(tabs)/dictate';
 // eslint-disable-next-line import/first
 import HistoryScreen from '@/app/(tabs)/history';
 // eslint-disable-next-line import/first
@@ -345,6 +348,19 @@ describe('pictures of the Notes screens, with Meetings and History beside them',
     await shot(`${name}-short-note-expert`, <NoteScreen />, async (c) => {
       await press(c, 'Expert');
     });
+  });
+
+  it('T-1072: Dictate and Notes while recording: the line that says it goes on in the background, and the notice after a call', async () => {
+    const name = process.env.WISPRA_SHOTS_PREFIX ?? 'after';
+    mockEntries = [...DICTATIONS, ...LIST];
+    mockPhase = 'recording';
+    mockTab = 'dictate';
+    await shot(`${name}-dictate-recording`, <WithBar><DictateScreen /></WithBar>);
+    mockNotice = 'The microphone was taken by a call or another app. Wispra carries on as soon as it is free; what you said so far is kept.';
+    mockTab = 'notes';
+    await shot(`${name}-notes-recording-after-a-call`, <WithBar><NotesScreen /></WithBar>);
+    mockNotice = null;
+    mockPhase = 'idle';
   });
 
   it('a meeting beside a note: the words as said, the expert outline, the status menu, the mind map', async () => {
