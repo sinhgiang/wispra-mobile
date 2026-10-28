@@ -138,7 +138,10 @@ jobs:
           plutil -p "$APPEX/Info.plist"
           test "$(plutil -extract NSExtension.NSExtensionPointIdentifier raw -o - "$APPEX/Info.plist")" = "com.apple.widgetkit-extension"
           EXE=$(plutil -extract CFBundleExecutable raw -o - "$APPEX/Info.plist")
-          nm "$APPEX/$EXE" | grep "RecordingLiveActivity" | head -n 3
+          # The Live Activity is in the binary (Swift shortens repeated words in names, so only "LiveActivity" is looked for)
+          nm "$APPEX/$EXE" > "$RUNNER_TEMP/recording-symbols.txt"
+          grep "LiveActivity" "$RUNNER_TEMP/recording-symbols.txt" | head -n 3 || true
+          test "$(grep -c "LiveActivity" "$RUNNER_TEMP/recording-symbols.txt")" -gt 0
           APP=$(dirname "$(dirname "$APPEX")")
           test "$(plutil -extract NSSupportsLiveActivities raw -o - "$APP/Info.plist")" = "true"
           echo "The app starts Live Activities, and the extension draws them"
