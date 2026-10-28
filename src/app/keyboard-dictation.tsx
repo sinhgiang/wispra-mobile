@@ -17,7 +17,8 @@ type Stage = 'listening' | 'transcribing' | 'ready' | 'saved' | 'error';
 // microphone, so the words are spoken here: listen, tap Done, and once they are transcribed they
 // are left for the keyboard, which types them when the user goes back to the app they were in.
 export default function KeyboardDictationScreen() {
-  const rec = useRecording('dictation');
+  // Ends when the person leaves for the app they were typing in: no background recording here
+  const rec = useRecording('dictation', { background: false });
   const { entries } = useEntries();
   const session = useSession();
   const [stage, setStage] = useState<Stage>('listening');

@@ -10,6 +10,7 @@ import { Gap, W } from '@/constants/wispra';
 import { formatDuration, sortEntries } from '@/lib/entries';
 import { useEntries } from '@/lib/entries-store';
 import { NOTE_TEXT } from '@/lib/notes';
+import { HINT_BACKGROUND_STOP } from '@/lib/recording-watch';
 import { transcriptionAvailable } from '@/lib/transcriber';
 import { useRecording } from '@/lib/use-recording';
 
@@ -42,6 +43,7 @@ export default function NotesScreen() {
                 {NOTE_TEXT.listening} · {formatDuration(rec.durationMs)}
               </Text>
             </View>
+            <Text style={styles.saved}>{HINT_BACKGROUND_STOP}</Text>
             <View style={ui.row}>
               <Button kind="danger" label={NOTE_TEXT.stop} disabled={rec.phase === 'saving'} onPress={finish} />
               <Button label={NOTE_TEXT.cancel} onPress={rec.cancel} />
@@ -50,6 +52,7 @@ export default function NotesScreen() {
         ) : (
           <Button kind="primary" label={NOTE_TEXT.record} disabled={rec.phase === 'starting'} onPress={begin} />
         )}
+        {rec.notice ? <Text style={styles.notice}>{rec.notice}</Text> : null}
         {rec.error ? <Text style={styles.error}>{rec.error}</Text> : null}
         {savedId && !live ? <Text style={styles.saved}>{transcriptionAvailable() ? NOTE_TEXT.transcribing : NOTE_TEXT.needSignIn}</Text> : null}
       </View>
@@ -78,6 +81,7 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: W.red },
   liveText: { color: W.red, fontSize: 14, fontWeight: '600' },
   error: { color: W.red, fontSize: 13 },
+  notice: { color: W.amber, fontSize: 13, lineHeight: 19 },
   saved: { color: W.muted, fontSize: 13, lineHeight: 19 },
   emptyTitle: { color: W.text, fontSize: 15, fontWeight: '600' },
   emptyNote: { color: W.muted, fontSize: 13, lineHeight: 19 },

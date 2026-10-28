@@ -634,7 +634,9 @@ export function EntriesProvider({ children }: { children: ReactNode }) {
   // A meeting whose pieces are done: its text, and whether everything could be transcribed
   const finishMeeting = useCallback(
     (e: Entry) => {
-      update(e.id, finishedMeeting(e.segments ?? []));
+      const finished = finishedMeeting(e.segments ?? [], e.kind);
+      // A dictation recorded in pieces counts its words like one recorded whole
+      update(e.id, e.kind === 'dictation' && finished.status === 'done' && finished.text ? { ...finished, ...dictated(e, finished.text) } : finished);
     },
     [update],
   );
