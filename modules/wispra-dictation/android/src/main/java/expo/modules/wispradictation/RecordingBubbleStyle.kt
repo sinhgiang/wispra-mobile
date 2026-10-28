@@ -26,9 +26,9 @@ object RecordingBubbleStyle {
   const val AMBER = 0xFFF59E0B
   const val INK = 0xFF1B1D2A
 
-  const val SIZE_DP = 44
-  /** The whole button is this see-through (1 is solid) */
-  const val ALPHA = 0.6f
+  const val SIZE_DP = 40
+  /** The whole button is this see-through (1 is solid): faint, as the owner asked, like the computer's */
+  const val ALPHA = 0.5f
   /** Space between the button and the right edge, in dp */
   const val EDGE_DP = 4
   /** How far down the screen it sits, as a share of the screen's height */

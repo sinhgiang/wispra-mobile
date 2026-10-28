@@ -30,7 +30,10 @@ class RecordingBubbleStyleTest {
   @Test
   fun isFaintSoItDoesNotHideWhatIsUnderIt() {
     assertTrue(RecordingBubbleStyle.ALPHA > 0.3f)
-    assertTrue(RecordingBubbleStyle.ALPHA < 0.8f)
+    // Faint: at most half solid (the owner, T-1073)
+    assertTrue(RecordingBubbleStyle.ALPHA <= 0.5f)
+    // Small, but a finger can still hit it
+    assertTrue(RecordingBubbleStyle.SIZE_DP in 36..48)
   }
 
   @Test

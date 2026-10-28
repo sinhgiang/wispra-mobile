@@ -122,6 +122,35 @@ describe('the indicator follows a recording', () => {
     expect(mockHideBubble).toHaveBeenCalledTimes(1);
   });
 
+  it('Meetings, Android: the person records, goes to Facebook, comes back, goes to Zalo: the button is there each time they are away', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    await renderHook(() => useRecordingIndicator('meeting', 'recording', 90_000));
+    for (let away = 1; away <= 3; away += 1) {
+      mockShowBubble.mockClear();
+      mockHideBubble.mockClear();
+      await goTo('inactive');
+      await goTo('background');
+      expect(mockShowBubble).toHaveBeenLastCalledWith('recording');
+      await goTo('active');
+      expect(mockHideBubble).toHaveBeenCalledTimes(1);
+      expect(mockShowBubble.mock.calls.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('Meetings, iPhone: the Live Activity is up from the start and says Meeting, whichever app the person is in', async () => {
+    const { rerender } = await renderHook((p: { status: IndicatorStatus | null }) => useRecordingIndicator('meeting', p.status, 0), {
+      initialProps: { status: 'recording' as IndicatorStatus | null },
+    });
+    expect(mockShowActivity.mock.calls[0].slice(0, 2)).toEqual(['Meeting', 'recording']);
+    // Going to other apps and back changes nothing for it: iOS keeps showing it
+    await goTo('background');
+    await goTo('active');
+    expect(mockShowActivity).toHaveBeenCalledTimes(1);
+    expect(mockHideActivity).not.toHaveBeenCalled();
+    await rerender({ status: null });
+    expect(mockHideActivity).toHaveBeenCalledTimes(1);
+  });
+
   it('Android: while paused or waiting for the microphone the button says so', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     setApp('background');
