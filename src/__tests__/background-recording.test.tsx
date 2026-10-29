@@ -61,7 +61,15 @@ jest.mock('expo-audio', () => {
   };
 });
 jest.mock('@/lib/storage', () => ({ keepAudio: (uri: string) => uri }));
-jest.mock('@/modules/wispra-keyboard-bridge', () => ({ endSessionBeforeRecording: async () => undefined }));
+// The small recording indicator (T-1073): the Live Activity on iPhone, noted here
+const mockShowActivity = jest.fn(async (..._args: unknown[]) => true);
+const mockHideActivity = jest.fn(async () => undefined);
+jest.mock('@/modules/wispra-keyboard-bridge', () => ({
+  endSessionBeforeRecording: async () => undefined,
+  showRecordingIndicator: (...args: unknown[]) => mockShowActivity(...args),
+  hideRecordingIndicator: () => mockHideActivity(),
+}));
+jest.mock('@/modules/wispra-dictation', () => ({ showRecordingBubble: () => false, hideRecordingBubble: () => undefined }));
 jest.mock('@/lib/entries-store', () => {
   const change = (id: string, f: (e: Entry) => Entry) => {
     const i = mockEntries.findIndex((e) => e.id === id);
@@ -113,6 +121,8 @@ beforeEach(() => {
   mockModes.length = 0;
   mockEntries.length = 0;
   mockTranscribe.mockClear();
+  mockShowActivity.mockClear();
+  mockHideActivity.mockClear();
   jest.replaceProperty(Platform, 'OS', 'ios');
 });
 afterEach(() => {
@@ -304,5 +314,66 @@ describe('Cancel (T-1072)', () => {
     expect(mockEntries).toHaveLength(0);
     expect(hook.result.current.phase).toBe('idle');
     expect(mockModes[mockModes.length - 1]).toMatchObject({ allowsRecording: false, allowsBackgroundRecording: false });
+  });
+});
+
+describe('the small indicator follows the recording (T-1073)', () => {
+  const statuses = () => mockShowActivity.mock.calls.map((c) => c[1]);
+
+  it('goes up when recording starts, with what is being recorded, and comes down at Stop', async () => {
+    const hook = await started('note');
+    expect(mockShowActivity).toHaveBeenCalledTimes(1);
+    expect(mockShowActivity.mock.calls[0].slice(0, 2)).toEqual(['Note', 'recording']);
+    await tick(2 * 30);
+    // Half-second looks change nothing on the lock screen: the timer there counts by itself
+    expect(mockShowActivity).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await hook.result.current.stop();
+    });
+    expect(mockHideActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('says what the recording is: a meeting, a dictation', async () => {
+    await started('meeting');
+    expect(mockShowActivity.mock.calls[0][0]).toBe('Meeting');
+    await started('dictation');
+    expect(mockShowActivity.mock.calls[1][0]).toBe('Dictation');
+  });
+
+  it('changes for a pause and back, and for a call', async () => {
+    const hook = await started('note');
+    await tick(2 * 5);
+    await act(async () => hook.result.current.pause());
+    expect(statuses()).toEqual(['recording', 'paused']);
+    await act(async () => hook.result.current.resume());
+    expect(statuses()).toEqual(['recording', 'paused', 'recording']);
+    // A call takes the microphone, and gives it back
+    mockRecorders[0].recording = false;
+    mockMicrophoneBusy = true;
+    await tick(4, false);
+    expect(statuses()[statuses().length - 1]).toBe('interrupted');
+    mockMicrophoneBusy = false;
+    await tick(2 * 3, false);
+    expect(statuses()[statuses().length - 1]).toBe('recording');
+    await act(async () => {
+      await hook.result.current.stop();
+    });
+  });
+
+  it('is not shown for a recording that ends when the person leaves the app', async () => {
+    const hook = await started('dictation', { background: false });
+    await tick(2 * 5);
+    expect(mockShowActivity).not.toHaveBeenCalled();
+    await act(async () => {
+      await hook.result.current.stop();
+    });
+  });
+
+  it('comes down when the recording is thrown away', async () => {
+    const hook = await started('note');
+    await act(async () => {
+      await hook.result.current.cancel();
+    });
+    expect(mockHideActivity).toHaveBeenCalledTimes(1);
   });
 });

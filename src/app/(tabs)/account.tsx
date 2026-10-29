@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Body, Button, Card, Title, ui } from '@/components/wispra/ui';
@@ -18,6 +18,7 @@ import { TRANSCRIBE_LANGUAGES, transcribeLanguageLabel } from '@/lib/transcribe-
 import { chooseTranscribeLanguage, syncTranscribeLanguage } from '@/lib/transcribe-language-store';
 import { useSetupState } from '@/lib/use-setup';
 import { useSession } from '@/lib/use-session';
+import { bubbleSupported, canShowRecordingBubble, openOverlaySettings } from '@/modules/wispra-dictation';
 
 export default function AccountScreen() {
   const { entries, syncState } = useEntries();
@@ -89,6 +90,8 @@ export default function AccountScreen() {
 
         <OtherApps />
 
+        <RecordingWave />
+
         <TranscriptionLanguage />
 
         <View style={styles.rows}>
@@ -156,6 +159,40 @@ function OtherApps() {
       </View>
       {rows[0]?.target === 'ios-settings' ? <Text style={styles.hint}>In Settings: Keyboards › Wispra on, and Allow Full Access.</Text> : null}
       {rows.some((r) => r.id === 'session-length') ? <Text style={styles.hint}>{SESSION_LIMITS_NOTE}</Text> : null}
+    </View>
+  );
+}
+
+// The faint wave at the edge of the screen while Wispra records in the background (T-1073, Android). It is a
+// window over other apps, which only the person can allow in Settings. On iPhone the same job is done by
+// the Live Activity, which needs nothing from here.
+function RecordingWave() {
+  const [allowed, setAllowed] = useState(canShowRecordingBubble);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setAllowed(canShowRecordingBubble());
+    });
+    return () => subscription.remove();
+  }, []);
+  if (!bubbleSupported) return null;
+  return (
+    <View style={styles.group}>
+      <Text style={styles.groupLabel}>While recording</Text>
+      <View style={styles.rows}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Wave over other apps: ${allowed ? 'on' : 'off'}. Open the setting`}
+          onPress={openOverlaySettings}
+          style={styles.row}>
+          <Text style={styles.rowLabel}>Wave over other apps</Text>
+          <View style={styles.rowEnd}>
+            {allowed ? null : <View style={styles.dot} />}
+            <Text style={styles.rowValue}>{allowed ? 'On' : 'Off'}</Text>
+            <Text style={styles.chevron}>›</Text>
+          </View>
+        </Pressable>
+      </View>
+      <Text style={styles.hint}>A faint wave at the edge of the screen while Wispra records and is not in front. Tap it to come back. Needs “Display over other apps” in Settings.</Text>
     </View>
   );
 }

@@ -6,6 +6,10 @@ interface NativeWispraDictation {
   openAccessibilitySettings(): void;
   isBubbleEnabled(): boolean;
   setBubbleEnabled(enabled: boolean): void;
+  canShowRecordingBubble(): boolean;
+  openOverlaySettings(): void;
+  showRecordingBubble(mode: string): boolean;
+  hideRecordingBubble(): void;
   getSession(): string | null;
   setSession(json: string | null): void;
   setCloudConfig(apiBase: string, supabaseUrl: string, publishableKey: string): void;
@@ -48,6 +52,25 @@ export function isBubbleEnabled(): boolean {
 
 export function setBubbleEnabled(enabled: boolean): void {
   native?.setBubbleEnabled(enabled);
+}
+
+// The recording indicator (T-1073): a faint round button at the right edge, over other apps, while Wispra
+// records and is not on screen. It needs "Display over other apps", which only the person can give.
+export function canShowRecordingBubble(): boolean {
+  return native?.canShowRecordingBubble() ?? false;
+}
+
+export function openOverlaySettings(): void {
+  native?.openOverlaySettings();
+}
+
+// mode: "recording" (the wave moves), "paused" or "interrupted" (it stands still). Answers whether it is shown.
+export function showRecordingBubble(mode: string): boolean {
+  return native?.showRecordingBubble(mode) ?? false;
+}
+
+export function hideRecordingBubble(): void {
+  native?.hideRecordingBubble();
 }
 
 // The Wispra Cloud sign-in (JSON), kept where the mic-button service can use it too

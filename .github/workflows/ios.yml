@@ -41,6 +41,8 @@ jobs:
         run: |
           # The app and the keyboard share one SharedChannel.swift, kept as two identical copies
           diff targets/keyboard/SharedChannel.swift modules/wispra-keyboard-bridge/ios/SharedChannel.swift
+          # The recording indicator (T-1073): the app and the Live Activity extension each hold the same attributes
+          diff targets/recording/RecordingActivityAttributes.swift modules/wispra-keyboard-bridge/ios/RecordingActivityAttributes.swift
           swiftc -parse-as-library targets/keyboard/Telex.swift targets/keyboard/KeyboardLogic.swift targets/keyboard/SharedChannel.swift modules/wispra-keyboard-bridge/ios/Segmenter.swift modules/wispra-keyboard-bridge/ios/SessionRecovery.swift targets-tests/keyboard/KeyboardTests.swift -o "$RUNNER_TEMP/keyboard-tests"
           "$RUNNER_TEMP/keyboard-tests"
 
@@ -107,7 +109,7 @@ jobs:
       - name: Inspect the built keyboard extension
         run: |
           set -euo pipefail
-          APPEX=$(find ~/Library/Developer/Xcode/DerivedData -path "*Release-iphoneos*" -name "*.appex" -type d | grep -v "/PlugIns/.*/PlugIns/" | head -n 1)
+          APPEX=$(find ~/Library/Developer/Xcode/DerivedData -path "*Release-iphoneos*" -name "WispraKeyboard.appex" -type d | grep -v "/PlugIns/.*/PlugIns/" | head -n 1)
           echo "Extension: $APPEX"
           plutil -p "$APPEX/Info.plist"
           EXE=$(plutil -extract CFBundleExecutable raw -o - "$APPEX/Info.plist")
@@ -123,6 +125,26 @@ jobs:
           # The keychain group the app and the keyboard share (T-0163), in both targets' entitlements
           for f in $(find ios -name "*.entitlements" -not -path "*/Pods/*"); do echo "== $f"; cat "$f"; done
           test "$(find ios -name '*.entitlements' -not -path '*/Pods/*' -exec grep -l 'com.sinhgiang.wispramobile.shared' {} + | wc -l)" -ge 2
+
+      # The recording indicator (T-1073): a widget extension with the Live Activity. What iOS needs to show
+      # it: the extension is inside the app, it is a WidgetKit extension that holds the activity, and the
+      # app says in its Info.plist that it starts Live Activities.
+      - name: Inspect the built recording indicator extension
+        run: |
+          set -euo pipefail
+          APPEX=$(find ~/Library/Developer/Xcode/DerivedData -path "*Release-iphoneos/Wispra.app/PlugIns/WispraRecording.appex" -type d | head -n 1)
+          echo "Extension: $APPEX"
+          test -n "$APPEX"
+          plutil -p "$APPEX/Info.plist"
+          test "$(plutil -extract NSExtension.NSExtensionPointIdentifier raw -o - "$APPEX/Info.plist")" = "com.apple.widgetkit-extension"
+          EXE=$(plutil -extract CFBundleExecutable raw -o - "$APPEX/Info.plist")
+          # The Live Activity is in the binary (Swift shortens repeated words in names, so only "LiveActivity" is looked for)
+          nm "$APPEX/$EXE" > "$RUNNER_TEMP/recording-symbols.txt"
+          grep "LiveActivity" "$RUNNER_TEMP/recording-symbols.txt" | head -n 3 || true
+          test "$(grep -c "LiveActivity" "$RUNNER_TEMP/recording-symbols.txt")" -gt 0
+          APP=$(dirname "$(dirname "$APPEX")")
+          test "$(plutil -extract NSSupportsLiveActivities raw -o - "$APP/Info.plist")" = "true"
+          echo "The app starts Live Activities, and the extension draws them"
 
       - name: Keep the build log
         if: always()

@@ -1,6 +1,7 @@
 package expo.modules.wispradictation
 
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
@@ -47,6 +48,27 @@ class WispraDictationModule : Module() {
 
     Function("setBubbleEnabled") { enabled: Boolean ->
       DictationPrefs.setBubbleEnabled(context, enabled)
+    }
+
+    // The recording indicator (T-1073): a faint round button at the right edge, over other apps, while Wispra
+    // records and is not on screen. It needs "Display over other apps", which only the user can give.
+    Function("canShowRecordingBubble") {
+      Settings.canDrawOverlays(context)
+    }
+
+    Function("openOverlaySettings") {
+      val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(intent)
+    }
+
+    // mode: "recording" (the wave moves), or "paused" / "interrupted" (it stands still)
+    Function("showRecordingBubble") { mode: String ->
+      RecordingIndicator.show(context, RecordingBubbleStyle.mode(mode))
+      Settings.canDrawOverlays(context)
+    }
+
+    Function("hideRecordingBubble") {
+      RecordingIndicator.hide()
     }
 
     // The Wispra Cloud sign-in (JSON), kept in one place for the app and the mic-button service

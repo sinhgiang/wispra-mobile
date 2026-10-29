@@ -42,6 +42,8 @@ interface NativeKeyboardBridge {
   clearKeyboardLog(): Promise<boolean>;
   noteKeyboardLog(text: string): Promise<boolean>;
   deliverText(utterance: string, index: number, text: string, last: boolean, failed: boolean): Promise<boolean>;
+  showRecordingIndicator(kind: string, status: string, startedAt: number, pausedAt: number): Promise<boolean>;
+  hideRecordingIndicator(): Promise<boolean>;
   addListener(event: 'onChunk', listener: (chunk: SessionChunk) => void): Subscription;
   addListener(event: 'onSession', listener: (state: SessionState) => void): Subscription;
 }
@@ -115,6 +117,25 @@ export async function sessionState(): Promise<SessionState> {
 // failed: the piece could not be transcribed (the keyboard says so, instead of "not heard")
 export async function deliverText(utterance: string, index: number, text: string, last: boolean, failed = false): Promise<boolean> {
   return native ? native.deliverText(utterance, index, text, last, failed) : false;
+}
+
+// iPhone: the Live Activity of a recording, a small wave in the Dynamic Island and on the lock screen.
+// startedAt and pausedAt are milliseconds since 1970 (pausedAt 0 while recording). Never fails the caller:
+// without the module, or with Live Activities off in Settings, there is just no indicator.
+export async function showRecordingIndicator(kind: string, status: string, startedAt: number, pausedAt: number): Promise<boolean> {
+  try {
+    return native ? await native.showRecordingIndicator(kind, status, startedAt, pausedAt) : false;
+  } catch {
+    return false;
+  }
+}
+
+export async function hideRecordingIndicator(): Promise<void> {
+  try {
+    await native?.hideRecordingIndicator();
+  } catch {
+    // Nothing to end
+  }
 }
 
 export function onSessionChunk(listener: (chunk: SessionChunk) => void): Subscription | null {

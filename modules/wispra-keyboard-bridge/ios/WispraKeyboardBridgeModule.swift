@@ -20,7 +20,21 @@ public class WispraKeyboardBridgeModule: Module {
       KeyboardSession.shared.noteUncleanEnd()
       KeyboardSession.shared.onChunk = { [weak self] info in self?.sendEvent("onChunk", info) }
       KeyboardSession.shared.onState = { [weak self] state in self?.sendEvent("onSession", state) }
+      // A recording indicator left on the lock screen by a run that iOS closed (T-1073)
+      RecordingActivityController.shared.hide()
     }
+
+    // The Live Activity of a recording: a small wave in the Dynamic Island and on the lock screen (T-1073).
+    // pausedAt is 0 while it is recording. Answers whether the indicator is on (Live Activities can be
+    // turned off in Settings).
+    AsyncFunction("showRecordingIndicator") { (kind: String, status: String, startedAt: Double, pausedAt: Double) -> Bool in
+      RecordingActivityController.shared.show(kind: kind, status: status, startedAtMs: startedAt, pausedAtMs: pausedAt)
+    }.runOnQueue(.main)
+
+    AsyncFunction("hideRecordingIndicator") { () -> Bool in
+      RecordingActivityController.shared.hide()
+      return true
+    }.runOnQueue(.main)
 
     AsyncFunction("startSession") { (minutes: Double) -> [String: Any] in
       try KeyboardSession.shared.start(minutes: minutes)
