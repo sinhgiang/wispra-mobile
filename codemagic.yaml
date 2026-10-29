@@ -33,70 +33,30 @@ workflows:
     artifacts:
       - /tmp/xcodebuild_logs/*.log
 
-  # Run once before the first TestFlight build (and again if a profile is missing). In the Apple
-  # Developer account it registers the bundle ids of the Wispra keyboard extension and of the recording indicator extension
-  # (T-1073, the Live Activity) if needed, and
-  # creates the App Store provisioning profiles of the app, of the keyboard and of the recording indicator, tied to the team's
-  # valid distribution certificates (the one Codemagic generated for Lenvid among them), using the
-  # App Store Connect API key lenvid-asc. "Fetch profiles" in Codemagic only lists profiles that
-  # already exist there; after this run it lists these three. Needs no secret: the integration
-  # supplies the API key, and making a profile needs only the certificates' ids, never their private
-  # keys. A profile that is already there is left as it is. Signs nothing and uploads nothing.
+  # Makes the App Store provisioning profiles of the app and its extensions in the Apple Developer account
+  # (it registers a bundle id first when there is none), tied to the team's valid distribution certificates,
+  # using the App Store Connect API key of the integration lenvid-asc. Needs no secret: the integration supplies
+  # the API key, and making a profile needs only the certificates' ids, never their private keys. A profile that
+  # is already there is left as it is. Signs nothing and uploads nothing.
+  # Started by a pushed tag profile-<date>-<time> (for example profile-20261029-1200), like build-* below, through
+  # the same repository webhook (T-1076). The TestFlight build below also makes the missing profiles by itself
+  # and fetches them, so this one is only for making them ahead of a build. The work is in
+  # scripts/codemagic/app-store-profiles.sh, where a new extension is added.
   ios-create-profile:
     name: 'iOS: create App Store profile'
     max_build_duration: 15
     instance_type: mac_mini_m2
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'profile-*'
+          include: true
     integrations:
       app_store_connect: lenvid-asc
     scripts:
       - name: Create the App Store profiles if they are missing
-        script: |
-          #!/bin/bash
-          set -euo pipefail
-          # Ids from the JSON the Codemagic CLI prints (a list of Apple resources), skipping
-          # anything that has expired
-          ids() {
-            python3 -c '
-          import json, sys, datetime
-          data = json.load(sys.stdin)
-          now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-          for item in data:
-              exp = (item.get("attributes") or {}).get("expirationDate")
-              if exp is None or exp > now:
-                  print(item["id"])
-          '
-          }
-          certs=$( { app-store-connect certificates list --type DISTRIBUTION --json | ids; app-store-connect certificates list --type IOS_DISTRIBUTION --json | ids; } | sort -u)
-          if [ -z "$certs" ]; then
-            echo "No valid distribution certificate in the Apple Developer account."
-            exit 1
-          fi
-          echo "Distribution certificates found: $(echo "$certs" | wc -l | tr -d ' ')"
-
-          # bundle id | name of the bundle id (if it has to be registered) | profile name
-          for line in \
-            "com.sinhgiang.wispramobile|Wispra|Wispra App Store" \
-            "com.sinhgiang.wispramobile.keyboard|Wispra Keyboard|Wispra Keyboard App Store" \
-            "com.sinhgiang.wispramobile.recording|Wispra Recording|Wispra Recording App Store"; do
-            IFS='|' read -r bundle_id bundle_name profile_name <<< "$line"
-            existing=$(app-store-connect profiles list --type IOS_APP_STORE --name "$profile_name" --state ACTIVE --json | ids)
-            if [ -n "$existing" ]; then
-              echo "The profile '$profile_name' already exists."
-              continue
-            fi
-            bundle=$(app-store-connect bundle-ids list --bundle-id-identifier "$bundle_id" --strict-match-identifier --json | ids | head -n 1)
-            if [ -z "$bundle" ]; then
-              echo "Registering the bundle id $bundle_id."
-              app-store-connect bundle-ids create "$bundle_id" --name "$bundle_name" --platform IOS
-              bundle=$(app-store-connect bundle-ids list --bundle-id-identifier "$bundle_id" --strict-match-identifier --json | ids | head -n 1)
-            fi
-            # shellcheck disable=SC2086
-            app-store-connect profiles create "$bundle" --type IOS_APP_STORE --name "$profile_name" --certificate-ids $certs
-            echo "Created the App Store profile '$profile_name' for $bundle_id."
-          done
-          echo "Next: Codemagic > Team settings > codemagic.yaml settings > Code signing identities >"
-          echo "iOS provisioning profiles > Fetch profiles, select 'Wispra App Store', 'Wispra Keyboard App Store' and 'Wispra Recording App Store',"
-          echo "Reference names wispra-app-store, wispra-keyboard-app-store and wispra-recording-app-store, Download selected."
+        script: bash scripts/codemagic/app-store-profiles.sh
 
   # Signed build, uploaded to App Store Connect so it appears in TestFlight for internal
   # testers. It is never sent to App Review or to external beta review: those stay manual steps
@@ -129,9 +89,11 @@ workflows:
       xcode: latest
       cocoapods: default
       ios_signing:
-        # The certificate and App Store profiles stored in Codemagic (Team settings > Code signing
-        # identities) for this bundle id. Extensions such as the keyboard
-        # (com.sinhgiang.wispramobile.keyboard) are matched too.
+        # The distribution certificate stored in Codemagic (Team settings > Code signing identities), which
+        # holds its private key; Apple does not give that key out, so it cannot be fetched during the build.
+        # The provisioning profiles do not come from here any more (T-1076): the first script below makes the
+        # missing ones in App Store Connect and saves them all on the build machine, so a new extension or
+        # bundle id needs nobody to press Fetch profiles in Codemagic. Profiles still stored there are not used.
         distribution_type: app_store
         bundle_identifier: com.sinhgiang.wispramobile
       vars:
@@ -139,6 +101,8 @@ workflows:
         # Dictation", created by the owner. If it is ever emptied, the build stops with a message.
         APP_STORE_APPLE_ID: "6819026553"
     scripts:
+      - name: Make and fetch the App Store profiles from App Store Connect
+        script: bash scripts/codemagic/app-store-profiles.sh --save
       - name: Check the App Store Connect app
         script: |
           #!/bin/bash

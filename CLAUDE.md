@@ -59,6 +59,13 @@ The owner never opens Codemagic. When there is new code for the owner to try on 
    TestFlight and how it differs from the build the owner has. Add a build item only when there is
    new code to try.
 
+Signing profiles (T-1076): the TestFlight build makes the missing App Store profiles in App Store Connect and fetches
+them during the build (`scripts/codemagic/app-store-profiles.sh`, the one place with the list of bundle ids), so nobody
+presses "Fetch profiles" in Codemagic when an extension or a bundle id is added: add one line to that script. To make
+the profiles ahead of a build, push a tag `profile-<YYYYMMDD>-<HHMM>` on a commit that has this `triggering` block
+(workflow "iOS: create App Store profile"). Only the distribution certificate still comes from Codemagic's stored
+identities (its private key cannot be fetched).
+
 Branch pushes never start Codemagic, so tag only commits the owner should try. Builds use Codemagic
 minutes. The tags `build-mobile-<branch>` belong to the Android workflow (its test APK releases) and
 are excluded from the trigger: never use that name for an iPhone build.
